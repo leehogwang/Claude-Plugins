@@ -8,12 +8,14 @@ marketplace named `leehogwang-plugins`, so any plugin here installs with two com
 | Plugin | What it does | Command |
 | --- | --- | --- |
 | [history](plugins/history) | Summarizes the session you are in, in a side pane: goal, what got done, decisions, what is in progress, what is open, ideas proposed but never built (todo), what to remember, files touched | `/history` |
+| [fork-origin](plugins/fork-origin) | After `/fork`, keeps the session you forked from open in a pane: its conversation, and an input that runs your message as a prompt in that session | `/origin` |
 
 ## Install
 
 ```sh
 claude plugin marketplace add leehogwang/Claude-Plugins
 claude plugin install history@leehogwang-plugins
+claude plugin install fork-origin@leehogwang-plugins
 ```
 
 Then start Claude Code again (or run `/reload-plugins` in a session).
@@ -33,6 +35,18 @@ claude --plugin-dir Claude-Plugins/plugins/history
 - Nothing new since the last run: no model call at all.
 - The pane shows how many tokens the last update used.
 - Needs Claude Code 2.1.287 or newer (mods), and `python3` on `PATH`.
+
+## fork-origin
+
+- `/fork` moves your Claude Code into a new session. The pane opens on the session you left.
+- The pane shows that session's conversation (your prompts and Claude's words).
+- Type in the pane's input and press Enter: it runs as your prompt in the original session
+  (`claude -p --resume <id> "<text>"`) and the reply streams into the pane. Nothing runs, and nothing
+  is spent, until you write to it.
+- `/origin` reopens the pane; `/origin <session id>` opens any session the same way.
+- "터미널에서 열기" shows `claude --resume <id>`, to open the original as a full Claude Code in another terminal.
+- A tool the original needs approval for cannot be approved from the pane (it runs as `claude -p`);
+  open it in a terminal for that.
 
 ---
 
