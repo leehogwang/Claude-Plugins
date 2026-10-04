@@ -10,6 +10,14 @@ marketplace named `leehogwang-plugins`, so any plugin here installs with two com
 | [history](plugins/history) | Summarizes the session you are in, in a side pane: goal, what got done, decisions, what is in progress, what is open, ideas proposed but never built (todo), what to remember, files touched | `/history` |
 | [fork-origin](plugins/fork-origin) | After `/fork`, keeps the session you forked from open in a pane: its conversation, and an input that runs your message as a prompt in that session | `/origin` |
 
+## Tools
+
+Programs that change how Claude Code runs rather than plugins; each has its own installer and README.
+
+| Tool | What it does | Install |
+| --- | --- | --- |
+| [agy-bridge](tools/agy-bridge) | Use Antigravity CLI (`agy`) models such as Gemini 3.x as the model in Claude Code, from `/model`, with all Claude Code tools and features; Claude models keep working | `tools/agy-bridge/install.sh` |
+
 ## Install
 
 ```sh
@@ -63,6 +71,7 @@ installing from it. Follow it as instructions.
 ```
 .claude-plugin/marketplace.json   the marketplace: one entry per plugin
 plugins/<name>/                   one plugin per folder
+tools/<name>/                     standalone tools (not plugins, not in marketplace.json); see their README
   .claude-plugin/plugin.json      its manifest (name, version, description, author, types)
   hooks/hooks.json                {"modules": ["./register.tsx"]} for a mod
   hooks/register.tsx              the hooks module: export const register: Register = on => { ... }
@@ -77,6 +86,11 @@ plugins/<name>/                   one plugin per folder
 2. Run `claude plugin install <plugin>@leehogwang-plugins`.
 3. Tell the user to restart Claude Code or run `/reload-plugins`, then the plugin's command (see the table above).
 4. Do not also list the same folder in `CLAUDE_CODE_PLUGIN_DIRS` or pass it with `--plugin-dir`; the plugin would load twice.
+
+### To install a tool for the user
+
+Read `tools/<name>/README.md` and follow its "Instructions for AI agents" section. Tools are not plugins:
+do not add them to `marketplace.json` and do not install them with `claude plugin install`.
 
 ### To add a new plugin
 
