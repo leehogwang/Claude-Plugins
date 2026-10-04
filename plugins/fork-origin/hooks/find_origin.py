@@ -22,6 +22,21 @@ if not forked or not leaf: sys.exit('not a fork')
 holders = subprocess.run(['grep', '-l', '--', leaf, *glob.glob(os.path.expanduser('~/.claude/projects/*/*.jsonl'))],
                          capture_output=True, text=True).stdout.split()
 holders = [h for h in holders if os.path.abspath(h) != os.path.abspath(mine)]
+
+# Another fork of the same session holds the message too, but in its copied history: before its own
+# fork notice (still queued, or delivered after it). The original holds it as one of its own.
+def is_copy(path):
+    with open(path, encoding='utf-8', errors='replace') as f:
+        queued = False
+        for line in f:
+            if leaf in line: return queued
+            if 'fork-source' in line:
+                try: kind = json.loads(line).get('type')
+                except ValueError: kind = None
+                if kind == 'user': queued = False  # its own fork notice came and went: what follows is its own
+                else: queued = True
+    return False
+holders = [h for h in holders if not is_copy(h)]
 if not holders: sys.exit('the original session was not found')
 best = max(holders, key=os.path.getmtime)
 sid = os.path.basename(best)[:-6]
