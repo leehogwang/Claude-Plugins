@@ -1,53 +1,51 @@
-import sys, os, glob, json, subprocess
+import sys, os, glob, json, re, subprocess
 
-# <session id>: the session this one was forked from, by the messages the fork copied from it.
-# A fork's transcript starts with the original's messages under the same uuids; of the other
-# transcripts holding the last of them, the most recently written is the original as it runs now
-# (its `continued-in` records followed, when the original moved on to a new id).
-mine = glob.glob(os.path.expanduser(f'~/.claude/projects/*/{sys.argv[1]}.jsonl'))
+# <session id>: the session this one was forked from. A fork is told, in a <fork-source> notice,
+# the name of the session it copies and the time up to which the two share their history; the
+# last message of that shared history is in both transcripts under the same uuid.
+PROJECTS = os.path.expanduser('~/.claude/projects')
+NOTICE = re.compile(r"self-reported name is '(.*?)'\. The conversation up to (\S+?Z) is shared history")
+
+def transcript(sid):
+    found = glob.glob(f'{PROJECTS}/*/{sid}.jsonl')
+    return max(found, key=os.path.getmtime) if found else None
+
+mine = transcript(sys.argv[1])
 if not mine: sys.exit(f'no transcript for session {sys.argv[1]}')
-mine = max(mine, key=os.path.getmtime)
-# the fork notice arrives as a user message right after the copied history
-leaf, forked = None, False
+records = []
 with open(mine, encoding='utf-8', errors='replace') as f:
     for line in f:
-        try: m = json.loads(line)
-        except ValueError: continue
-        if 'fork-source' in line:
-            forked = True
-            if m.get('type') == 'user': break  # delivered: the copied history ends here
-            continue  # still queued (the fork just started): the copied history is all there is
-        leaf = m.get('uuid') or leaf
-if not forked or not leaf: sys.exit('not a fork')
-holders = subprocess.run(['grep', '-l', '--', leaf, *glob.glob(os.path.expanduser('~/.claude/projects/*/*.jsonl'))],
-                         capture_output=True, text=True).stdout.split()
-holders = [h for h in holders if os.path.abspath(h) != os.path.abspath(mine)]
+        try: records.append(json.loads(line))
+        except ValueError: pass
 
-# Another fork of the same session holds the message too, but in its copied history: before its own
-# fork notice (still queued, or delivered after it). The original holds it as one of its own.
-def is_copy(path):
-    with open(path, encoding='utf-8', errors='replace') as f:
-        queued = False
-        for line in f:
-            if leaf in line: return queued
-            if 'fork-source' in line:
-                try: kind = json.loads(line).get('type')
-                except ValueError: kind = None
-                if kind == 'user': queued = False  # its own fork notice came and went: what follows is its own
-                else: queued = True
-    return False
-holders = [h for h in holders if not is_copy(h)]
+# the latest notice is this session's own (earlier ones came with history copied from a fork)
+name = upto = None
+for m in records:
+    # the notice itself: queued, or delivered as a plain user message (tool output quoting one is not)
+    text = m.get('content') if m.get('type') == 'queue-operation' else (m.get('message') or {}).get('content') if m.get('type') == 'user' else None
+    if not isinstance(text, str): continue
+    for found in NOTICE.finditer(text):
+        name, upto = found.group(1), found.group(2)
+if not upto: sys.exit('not a fork')
+leaf = None
+for m in records:
+    if m.get('uuid') and m.get('timestamp') and m['timestamp'] <= upto: leaf = m['uuid']
+if not leaf: sys.exit('the shared history was not found')
+
+holders = subprocess.run(['grep', '-l', '--', leaf, *glob.glob(f'{PROJECTS}/*/*.jsonl')], capture_output=True, text=True).stdout.split()
+holders = [h for h in holders if os.path.abspath(h) != os.path.abspath(mine)]
 if not holders: sys.exit('the original session was not found')
-best = max(holders, key=os.path.getmtime)
-sid = os.path.basename(best)[:-6]
-for _ in range(10):  # follow continued-in
-    nxt = None
-    with open(best, encoding='utf-8', errors='replace') as f:
+
+def names(path):  # the titles a transcript has gone by
+    out = set()
+    with open(path, encoding='utf-8', errors='replace') as f:
         for line in f:
-            if '"continued-in"' in line:
-                try: nxt = json.loads(line).get('continuedInSessionId')
-                except ValueError: pass
-    path = glob.glob(os.path.expanduser(f'~/.claude/projects/*/{nxt}.jsonl')) if nxt else []
-    if not path or nxt == sys.argv[1]: break
-    best, sid = path[0], nxt
-print(sid)
+            if '"agent-name"' in line or '"custom-title"' in line or '"ai-title"' in line:
+                try: m = json.loads(line)
+                except ValueError: continue
+                out |= {m.get('agentName'), m.get('customTitle'), m.get('aiTitle')}
+    return out
+
+named = [h for h in holders if name in names(h)]
+best = max(named or holders, key=os.path.getmtime)
+print(os.path.basename(best)[:-6])
