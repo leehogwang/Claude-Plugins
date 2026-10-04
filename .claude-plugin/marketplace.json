@@ -1,0 +1,13 @@
+{
+  "name": "leehogwang-plugins",
+  "description": "Claude Code plugins and mods by leehogwang",
+  "owner": { "name": "leehogwang" },
+  "metadata": { "pluginRoot": "./plugins" },
+  "plugins": [
+    {
+      "name": "history",
+      "source": "history",
+      "description": "/history: summarize the session you are in with Haiku (goal, done, decisions, open, todo, what to remember); later runs send only what came after"
+    }
+  ]
+}

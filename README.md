@@ -1,0 +1,89 @@
+# Claude-Plugins
+
+Claude Code plugins and mods, one folder each under `plugins/`. The repository is also a plugin
+marketplace named `leehogwang-plugins`, so any plugin here installs with two commands.
+
+## Plugins
+
+| Plugin | What it does | Command |
+| --- | --- | --- |
+| [history](plugins/history) | Summarizes the session you are in, in a side pane: goal, what got done, decisions, what is in progress, what is open, ideas proposed but never built (todo), what to remember, files touched | `/history` |
+
+## Install
+
+```sh
+claude plugin marketplace add leehogwang/Claude-Plugins
+claude plugin install history@leehogwang-plugins
+```
+
+Then start Claude Code again (or run `/reload-plugins` in a session).
+
+Try one without installing:
+
+```sh
+git clone https://github.com/leehogwang/Claude-Plugins.git
+claude --plugin-dir Claude-Plugins/plugins/history
+```
+
+## history
+
+- `/history` opens a pane with the summary of the current session.
+- The first run sends the whole conversation (your prompts and everything Claude wrote; no tool output) to Haiku once.
+- Later runs send only what came after the last summary, together with that summary.
+- Nothing new since the last run: no model call at all.
+- The pane shows how many tokens the last update used.
+- Needs Claude Code 2.1.287 or newer (mods), and `python3` on `PATH`.
+
+---
+
+## For AI agents
+
+This section is written for an AI coding agent (Claude Code or similar) working in this repository or
+installing from it. Follow it as instructions.
+
+### Repository layout
+
+```
+.claude-plugin/marketplace.json   the marketplace: one entry per plugin
+plugins/<name>/                   one plugin per folder
+  .claude-plugin/plugin.json      its manifest (name, version, description, author, types)
+  hooks/hooks.json                {"modules": ["./register.tsx"]} for a mod
+  hooks/register.tsx              the hooks module: export const register: Register = on => { ... }
+  hooks/*                         anything else the module uses (e.g. extract.py for history)
+  types/index.d.ts                its $.state contract, when it keeps state
+  tests/*.test.ts                 tests run by `claude plugin test`
+```
+
+### To install a plugin for the user
+
+1. Run `claude plugin marketplace add leehogwang/Claude-Plugins` (once per machine).
+2. Run `claude plugin install <plugin>@leehogwang-plugins`.
+3. Tell the user to restart Claude Code or run `/reload-plugins`, then the plugin's command (see the table above).
+4. Do not also list the same folder in `CLAUDE_CODE_PLUGIN_DIRS` or pass it with `--plugin-dir`; the plugin would load twice.
+
+### To add a new plugin
+
+1. Create `plugins/<name>/` with the layout above. `<name>` uses letters, digits, `-`, `_`, `.` only.
+2. Add an entry to `.claude-plugin/marketplace.json`:
+   `{ "name": "<name>", "source": "<name>", "description": "<one line>" }`
+   (`source` is a bare folder name: `metadata.pluginRoot` is `./plugins`).
+3. Add a row for it to the Plugins table in this README and, if it needs one, a short section like `## history`.
+4. Check before committing, from the repository root and from the plugin folder:
+   - `claude plugin validate .` (marketplace) and `claude plugin validate plugins/<name>` (plugin)
+   - `claude plugin test plugins/<name>` (its tests must pass)
+5. Do not commit `plugins/*/.claude-plugin/types/` or `plugins/*/tsconfig.json`: Claude Code writes them
+   each time it loads a mod (`.gitignore` already excludes them).
+
+### To change a plugin
+
+- Bump `version` in its `.claude-plugin/plugin.json` when behaviour changes, so installed copies update.
+- Keep its tests passing; add one for the behaviour you change.
+- A change to the `history` summary prompt (`SYSTEM` in `plugins/history/hooks/register.tsx`) must also bump
+  the store key (`summary:vN:`) so old summaries made with the previous prompt are not reused.
+
+### Rules for this repository
+
+- Commits are authored by the repository owner. Do not add `Co-Authored-By` lines or other AI attribution
+  to commit messages.
+- Do not put secrets, tokens or personal paths in any file here.
+- Plugins must not modify the user's project files unless that is their stated purpose.
