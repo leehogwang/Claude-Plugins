@@ -38,15 +38,18 @@ claude --plugin-dir Claude-Plugins/plugins/history
 
 ## fork-origin
 
-- `/fork` moves your Claude Code into a new session. The pane opens on the session you left.
-- The pane shows that session's conversation (your prompts and Claude's words).
-- Type in the pane's input and press Enter: it runs as your prompt in the original session
-  (`claude -p --resume <id> "<text>"`) and the reply streams into the pane. Nothing runs, and nothing
-  is spent, until you write to it.
+- `/fork` starts a new session as a copy of the one you are in; the original keeps running.
+  In the fork, the pane opens on the original: the fork finds it by the messages it copied from it.
+- The pane shows the original's conversation (prompts and Claude's words), read again every 3 seconds.
+- Type in the pane's input and press Enter:
+  - the original still running: your text goes to it as a message from another session (it reads it
+    as such, not as your own prompt), and its answer shows up in the pane;
+  - the original stopped: your text runs in it as your prompt (`claude -p --resume <id> "<text>"`),
+    and the reply streams into the pane.
+- Nothing runs, and nothing is spent, until you write to it.
 - `/origin` reopens the pane; `/origin <session id>` opens any session the same way.
-- "터미널에서 열기" shows `claude --resume <id>`, to open the original as a full Claude Code in another terminal.
-- A tool the original needs approval for cannot be approved from the pane (it runs as `claude -p`);
-  open it in a terminal for that.
+- "터미널에서 열기" shows `claude --resume <id>`, to open the original as a full Claude Code elsewhere.
+- A tool the original needs approval for cannot be approved from the pane; open it in a terminal.
 
 ---
 

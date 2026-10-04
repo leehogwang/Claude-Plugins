@@ -3,9 +3,9 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import type { OriginSession } from '../types'
 
-// After /fork this process continues in a new session. The one it left stays open here: its
-// conversation, and an input whose text runs as a prompt in that session (`claude -p --resume`),
-// so nothing runs, and nothing is spent, until you write to it.
+// /fork starts this session as a copy of another, which keeps running. The original stays open
+// here: its conversation, read again every few seconds, and an input that writes to it: a message
+// to it while it runs, else a prompt run in it (`claude -p --resume`). Nothing runs until you write.
 
 const PANE = 'fork-origin'
 const SHOWN = 40 // the latest messages drawn
@@ -15,7 +15,13 @@ const running = atom({ plugin: 'fork-origin', key: 'running' } as const, false)
 const error = atom({ plugin: 'fork-origin', key: 'error' } as const, '')
 const hint = atom({ plugin: 'fork-origin', key: 'hint' } as const, false) // the resume command shown
 
-let known = '' // the session id as of the last event: after a fork, the original
+let ticking: { cancel: () => void } | undefined // the pane's refresh
+
+// The session this one was forked from: the fork copied its messages under the same uuids.
+async function findOrigin($: EngineInterface) {
+  const r = await $.process.run(['python3', `${$.plugin.root}/hooks/find_origin.py`, await $.session.id()], { timeoutMs: 60_000 })
+  return r.exitCode === 0 ? r.stdout.trim() : ''
+}
 
 async function load($: EngineInterface, id: string) {
   const r = await $.process.run(['python3', `${$.plugin.root}/hooks/transcript.py`, id], { timeoutMs: 60_000 })
@@ -28,6 +34,11 @@ async function show($: EngineInterface, id: string) {
   await update($, error, () => '')
   await update($, reply, () => '')
   await $.ui.open({ id: PANE, title: 'Original session' })
+  ticking?.cancel()
+  ticking = $.clock.every(3000, async () => {
+    const o = await read($, origin)
+    if (o.id && !(await read($, running))) await load($, o.id).catch(() => undefined)
+  })
   try {
     await load($, id)
   } catch (err) {
@@ -35,12 +46,18 @@ async function show($: EngineInterface, id: string) {
   }
 }
 
-// One turn in the original session, as if typed there; its words stream into the pane.
+// To the original: a message while it runs (it reads it as from another session), else one turn
+// run in it as your prompt, its words streamed into the pane.
 async function send($: EngineInterface, text: string) {
   const o = await read($, origin)
   if (!o.id || !text.trim() || (await read($, running))) return
-  await update($, running, () => true)
   await update($, error, () => '')
+  const sent = await $.session.send({ to: { sessionId: o.id }, text })
+  if (sent.isDelivered) {
+    await update($, reply, () => '')
+    return
+  }
+  await update($, running, () => true)
   await update($, reply, () => '')
   await update($, origin, v => ({ ...v, turns: [...v.turns, { who: 'user' as const, text }] }))
   try {
@@ -66,24 +83,28 @@ async function send($: EngineInterface, text: string) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    known = await $.session.id()
     await $.command.register({ name: 'origin', description: 'Open the session this one forked from (or /origin <session id>) and talk to it' })
     return next(e)
   })
 
+  // a fork just started: its notice may not be in the transcript yet, so look again a few times
   on('classic.SessionStart', async ($, e, next) => {
     const started = await next(e)
-    if (e.source === 'fork' && known && known !== e.session_id) {
-      const left = known
-      void show($, left)
+    if (e.source === 'fork') {
+      void (async () => {
+        for (let tries = 0; tries < 5; tries++) {
+          const id = await findOrigin($)
+          if (id) return show($, id)
+          await $.clock.sleep(1000)
+        }
+      })()
     }
-    known = e.session_id
     return started
   })
 
   on('command.run', { command: 'origin' }, async ($, e) => {
-    const id = e.args.trim() || (await read($, origin)).id
-    if (!id) return { text: 'No fork yet in this process. /origin <session id> opens any session.' }
+    const id = e.args.trim() || (await read($, origin)).id || (await findOrigin($))
+    if (!id) return { text: 'This session is not a fork. /origin <session id> opens any session.' }
     await show($, id)
     const failed = await read($, error)
     return { text: failed || `Original session ${id.slice(0, 8)} is open in its pane.` }
