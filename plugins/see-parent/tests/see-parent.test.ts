@@ -6,6 +6,7 @@ const TRANSCRIPT = { cwd: '/w/proj', turns: [{ who: 'user', text: '모델 구조
 
 function world(on: On, turns: () => typeof TRANSCRIPT.turns) {
   mock.clock(on)
+  mock.store(on)
   on('session.id', () => ({ value: 'fork-5678' }))
   on('ui.open', () => ({ value: {} as never }))
   on('classic.SessionStart', () => ({}))

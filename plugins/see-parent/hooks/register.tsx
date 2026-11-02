@@ -35,6 +35,8 @@ async function show($: EngineInterface, id: string) {
   await update($, error, () => '')
   await update($, reply, () => '')
   await $.ui.open({ id: PANE, title: 'Original session' })
+  await $.store.set('open', true)
+  await $.store.set(`origin:${await $.session.id()}`, id)
   ticking?.cancel()
   ticking = $.clock.every(3000, async () => {
     const o = await read($, origin)
@@ -86,6 +88,15 @@ async function send($: EngineInterface, text: string) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'parent', description: 'Open the session this one forked from (or /parent <session id>) and talk to it' })
+    // it was open for this session when it last ended (a resume): open it on the same original again
+    const kept = (await $.store.get(`origin:${await $.session.id()}`)) as string | undefined
+    if (kept && (await $.store.get('open'))) await show($, kept)
+    return next(e)
+  })
+
+  // closed by hand (or by a plugin): not open again next time; an unload at exit does not count
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANE && e.origin.kind !== 'unload') await $.store.set('open', false)
     return next(e)
   })
 
