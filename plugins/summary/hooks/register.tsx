@@ -112,11 +112,24 @@ async function summarize($: EngineInterface) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'summary', description: 'Summarize this session so far (one Haiku call; none if nothing changed)' })
+    // it was open when the last session ended: open again, with the summary kept for this session
+    if (await $.store.get('open')) {
+      const kept = (await $.store.get(`summary:v10:${await $.session.id()}`)) as Summary | undefined
+      if (kept) await update($, summary, () => kept)
+      await $.ui.open({ id: PANE, title: 'This session' })
+    }
+    return next(e)
+  })
+
+  // closed by hand (or by a plugin): not open again next time; an unload at exit does not count
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANE && e.origin.kind !== 'unload') await $.store.set('open', false)
     return next(e)
   })
 
   on('command.run', { command: 'summary' }, async $ => {
     await $.ui.open({ id: PANE, title: 'This session' })
+    await $.store.set('open', true)
     void summarize($) // in the background: the command returns at once, the pane fills in when Haiku is done
     return { text: 'Summarizing in the Summary pane…' }
   })
