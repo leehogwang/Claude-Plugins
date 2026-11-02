@@ -4,6 +4,6 @@ export type OriginSession = { id: string; cwd: string; turns: Turn[] }
 
 declare module 'claude-code' {
   interface PluginState {
-    'see-parent': { origin: OriginSession; reply: string; running: boolean; error: string; hint: boolean }
+    'see-parent': { origin: OriginSession; reply: string; running: boolean; error: string; draft: string; hint: boolean }
   }
 }

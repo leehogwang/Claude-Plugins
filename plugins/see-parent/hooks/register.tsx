@@ -13,6 +13,7 @@ const origin = atom({ plugin: 'see-parent', key: 'origin' } as const, { id: '', 
 const reply = atom({ plugin: 'see-parent', key: 'reply' } as const, '') // what the original is writing now
 const running = atom({ plugin: 'see-parent', key: 'running' } as const, false)
 const error = atom({ plugin: 'see-parent', key: 'error' } as const, '')
+const draft = atom({ plugin: 'see-parent', key: 'draft' } as const, '') // the text in the input, kept so that sending can empty it
 const hint = atom({ plugin: 'see-parent', key: 'hint' } as const, false) // the resume command shown
 
 let ticking: { cancel: () => void } | undefined // the pane's refresh
@@ -51,6 +52,7 @@ async function show($: EngineInterface, id: string) {
 async function send($: EngineInterface, text: string) {
   const o = await read($, origin)
   if (!o.id || !text.trim() || (await read($, running))) return
+  await update($, draft, () => '')
   await update($, error, () => '')
   const sent = await $.session.send({ to: { sessionId: o.id }, text })
   if (sent.isDelivered) {
@@ -151,7 +153,7 @@ export const register: Register = on => {
         {failed ? <Text color="red">{failed}</Text> : null}
         {o.id && 'Input' in ui && (
           <Box marginTop={1}>
-            <ui.Input key="ask" placeholder={busy ? '원본이 답하는 중…' : '원본 세션에게 보내기 (Enter)'} submitLabel="보내기" onSubmit={(text: string) => send($, text)} />
+            <ui.Input key="ask" value={await read($, draft)} onInput={(v: string) => update($, draft, () => v)} placeholder={busy ? '원본이 답하는 중…' : '원본 세션에게 보내기 (Enter)'} submitLabel="보내기" onSubmit={(text: string) => send($, text)} />
           </Box>
         )}
       </Box>
