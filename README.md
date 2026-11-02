@@ -37,8 +37,8 @@ Try one without installing: `claude --plugin-dir ~/Claude-Plugins/plugins/summar
 
 ## Panes come back
 
-`summary`, `see-parent` and `call` remember that their pane was open. Leave the session and enter it again (resume) and they open again by themselves;
-close one by hand and it stays closed next time. `call` also brings back its chats and the ids that continue each CLI's conversation, `summary` its
+`summary`, `see-parent` and `call` remember, per session, that their pane was open. Leave a session and enter it again (resume) and they open again by
+themselves there (a session where you never opened one stays as it was); close one by hand and it stays closed next time. `call` also brings back its chats and the ids that continue each CLI's conversation, `summary` its
 summary, and `see-parent` its original session. `filetree` is not one of these: it opens only with `/filetree` (see above), and `replay-theater` is drawn per turn.
 
 ## summary
@@ -70,11 +70,18 @@ summary, and `see-parent` its original session. `filetree` is not one of these: 
 - `/call` finds which of claude, codex, agy and opencode are installed and opens a pane with a tab for each.
 - Type in the pane: the CLI runs one non-interactive turn (`claude -p`, `codex exec`, `agy -p`, `opencode run`) in the
   folder the session works in, and the next message continues the same conversation by its id.
-- Each CLI keeps its own chat and works on its own: start a task in codex, switch to claude, come back later (`⟳` on the tab means it is working).
+- Each CLI keeps its own chat and works on its own: start a task in codex, switch to claude, come back later (a blue tab means it is working).
 - The conversation of the Claude Code session you are in goes along: the first message to a CLI carries it as a file to read
   (`~/.cache/claude-call/`). Every later message brings what happened in Claude Code since that CLI's last turn, so a CLI called
   earlier is up to date the next time you ask it: your prompts, what you ran in your terminal, Claude's words, the commands Claude
-  ran, and every file it changed as a diff (no tool output). It is delivered with your next message to that CLI, not pushed while it idles.
+  ran, and every file it changed as a complete diff (no tool output). It is delivered with your next message to that CLI, not pushed while it idles.
+  Nothing is cut: the whole conversation goes, and every diff goes whole in its own file. In a git folder the diffs also cover what a shell
+  command, another AI or an editor changed (the working tree is snapshotted each turn and diffed against the last snapshot; the first
+  turn diffs it against HEAD), not only Claude's Edit/Write. Once the conversation given to a CLI since it last summarised adds up to about
+  60,000 characters (counted over turns, not per turn), the CLI is told at the start of its turn to write a short summary of it and work
+  from that, adding to the notes it already has. The diffs are never summarised.
+  If the conversation cannot be read, nothing is sent: the pane says so and offers `↻ retry`.
+- What the pane shows for effort is what runs: with none chosen it is medium (else the lowest level the CLI has), and that is sent.
 - You see the work on the way (commands, files read or changed, remarks between steps) while a CLI works. When it is done the steps
   fold into one line (`▸ N steps`, click to unfold) above the answer, which is drawn as markdown.
 - Several CLIs work at once: ask agy, switch to codex and ask it too; neither is interrupted. A CLI that finishes while another tab is
