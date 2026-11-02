@@ -1,6 +1,6 @@
 {
   "name": "call",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "/call: pick an installed AI CLI (claude, codex, agy, opencode) and talk to it from a side pane, in the folder you are working in",
   "author": { "name": "leehogwang" },
   "types": "./types/index.d.ts"

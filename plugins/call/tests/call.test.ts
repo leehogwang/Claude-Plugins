@@ -230,3 +230,15 @@ test('a pane that was open comes back with its chats when the session is entered
   expect(spawned.at(-1)).toContain('cx-1') // and it goes on in the same conversation of the CLI
 
 })
+
+test('a button at the very top goes to the bottom, one at the very bottom goes to the top', async ($, on) => {
+  world(on)
+  await $.command.run({ command: 'call', args: 'codex' } as never)
+  const ui = await mount($)
+  await ui.input({ key: 'ask', text: 'hi' })
+  const tree = JSON.stringify(await ui.find({ type: 'Box' } as never)) // the whole pane, in drawing order
+  const at = (key: string) => tree.indexOf(`"key":"${key}"`)
+  expect(at('to-end')).toBeGreaterThan(-1)
+  expect(at('to-end')).toBeLessThan(at('model')) // first, in the row of tabs
+  expect(at('to-start')).toBeGreaterThan(at('ask')) // last, below the input
+})

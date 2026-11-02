@@ -79,6 +79,7 @@ summary, and `see-parent` its original session. `filetree` is not one of these: 
   fold into one line (`▸ 작업 N단계`, click to unfold) above the answer, which is drawn as markdown.
 - Several CLIs work at once: ask agy, switch to codex and ask it too; neither is interrupted. A CLI that finishes while another tab is
   shown gets a yellow tab until you open it.
+- **Jump buttons:** `⤓ 맨 아래` at the very top of the pane and `⤒ 맨 위` at the very bottom scroll the pane to its end or its start. They sit in place like the tabs (they scroll with the pane, they do not follow you).
 - **Narrow pane:** the pane is narrower than a terminal, so a table too wide for it (markdown with `|`, or drawn with box characters) is shown as a list, one item per row and one sub-item per column; narrow tables stay as they are. Agents are also told the pane width and asked not to draw box tables.
 - **Permission first:** every message to an agent starts with a ground rule: before changing code or files, running a command that
   changes something, or doing anything hard to undo, say the plan and wait for your go-ahead (your next message answers). Reading and

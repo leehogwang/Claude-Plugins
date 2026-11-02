@@ -391,6 +391,7 @@ export const register: Register = on => {
             )
           })}
           {chat.sid && <Button key="terminal" label="터미널에서 열기" plain dimColor onPress={() => update($, state, v => ({ ...v, hint: !v.hint }))} />}
+          <Button key="to-end" label="⤓ 맨 아래" plain dimColor onPress={() => $.ui.scroll({ in: PANE, to: 'end' })} />
         </Box>
         {cli && (() => {
           const models = s.models[cli] ?? []
@@ -472,6 +473,7 @@ export const register: Register = on => {
             <ui.Input key="ask" value={chat.draft} onInput={(v: string) => patch($, cli, c => ({ ...c, draft: v }))} placeholder={chat.running ? `${cli}가 답하는 중…` : `${cli}에게 보내기 (Enter)`} submitLabel="보내기" onSubmit={(text: string) => { void send($, text) }} />
           </Box>
         )}
+        <Button key="to-start" label="⤒ 맨 위" plain dimColor onPress={() => $.ui.scroll({ in: PANE, to: 'start' })} />
       </Box>
     )
   })
