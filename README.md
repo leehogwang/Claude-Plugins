@@ -62,7 +62,7 @@ summary, and `see-parent` its original session. `filetree` is not one of these: 
     and the reply streams into the pane.
 - Nothing runs, and nothing is spent, until you write to it.
 - `/parent` reopens the pane; `/parent <session id>` opens any session the same way.
-- "터미널에서 열기" shows `claude --resume <id>`, to open the original as a full Claude Code elsewhere.
+- "Open in terminal" shows `claude --resume <id>`, to open the original as a full Claude Code elsewhere.
 - A tool the original needs approval for cannot be approved from the pane; open it in a terminal.
 
 ## call
@@ -76,10 +76,10 @@ summary, and `see-parent` its original session. `filetree` is not one of these: 
   earlier is up to date the next time you ask it: your prompts, what you ran in your terminal, Claude's words, the commands Claude
   ran, and every file it changed as a diff (no tool output). It is delivered with your next message to that CLI, not pushed while it idles.
 - You see the work on the way (commands, files read or changed, remarks between steps) while a CLI works. When it is done the steps
-  fold into one line (`▸ 작업 N단계`, click to unfold) above the answer, which is drawn as markdown.
+  fold into one line (`▸ N steps`, click to unfold) above the answer, which is drawn as markdown.
 - Several CLIs work at once: ask agy, switch to codex and ask it too; neither is interrupted. A CLI that finishes while another tab is
   shown gets a yellow tab until you open it.
-- **Jump buttons:** `⤓ 맨 아래` at the very top of the pane and `⤒ 맨 위` at the very bottom scroll the pane to its end or its start. They sit in place like the tabs (they scroll with the pane, they do not follow you).
+- **Jump buttons:** a small `▼` in the top right corner of the pane scrolls it to its end, a small `▲` in the bottom right corner to its start. They sit in place like the tabs (they scroll with the pane, they do not follow you).
 - **Narrow pane:** the pane is narrower than a terminal, so a table too wide for it (markdown with `|`, or drawn with box characters) is shown as a list, one item per row and one sub-item per column; narrow tables stay as they are. Agents are also told the pane width and asked not to draw box tables.
 - **Permission first:** every message to an agent starts with a ground rule: before changing code or files, running a command that
   changes something, or doing anything hard to undo, say the plan and wait for your go-ahead (your next message answers). Reading and
@@ -88,14 +88,14 @@ summary, and `see-parent` its original session. `filetree` is not one of these: 
   turn ends. Two agents on one file show a red `⚠`. Agents are told which files others hold when you message them, and the Claude Code
   session itself is refused an Edit or Write on a flagged file (its own edits are flagged for the agents too, until its turn ends).
   Limits: an agent's own write cannot be stopped from here, and codex reports a change only after it is made.
-- Every CLI has its own **model** and **effort**, shown under the tabs. **model** is a dropdown: click it (or focus it and press Enter), then click a model;
-  **effort** is a slider (`-o---: low`, `--o--: medium`): click or drag along the track. The colour says it at a glance:
-  effort runs green (low) to red (max), grey is the CLI's default. agy lists each model once (Gemini 4 Argon, Gemini 3.8 Flash,
+- Every CLI has its own **model** and **effort**, shown above the input, at its right (with **clear**, which empties this tab's chat). **model** is a dropdown: click it (or focus it and press Enter), then click a model;
+  **effort** steps with the ◀ ▶ arrows around its name (`low` … `max`). The colour says it at a glance:
+  effort runs from light red (low) to a deeper red (max). agy lists each model once (Gemini 4 Argon, Gemini 3.8 Flash,
   Claude Opus 5.5, Claude Sonnet 5.5, GPT-OSS 120B) and offers only the efforts that model has; the two are joined into agy's own id
   when it runs. Typing `/model` or `/effort` in the pane lists the choices; `/model <name>`, `/effort <level>` and `default` set and clear them.
 - It is a chat, not a terminal: slash commands, the full-screen UI, approval prompts and Esc do not work in the pane.
   A turn cannot ask you to approve a tool, so every CLI runs in yolo mode: no approval prompts, no sandbox where the CLI has one
-  (`--dangerously-skip-permissions`, codex `--dangerously-bypass-approvals-and-sandbox`, opencode `--auto`). They can edit files and run commands in the working folder without asking. "터미널에서 열기" shows the
+  (`--dangerously-skip-permissions`, codex `--dangerously-bypass-approvals-and-sandbox`, opencode `--auto`). They can edit files and run commands in the working folder without asking. "Open in terminal" shows the
   command that continues the same conversation in a real terminal (`claude --resume <id>`, `codex resume <id>`, ...).
 - codex only runs in a git repository (its own rule).
 
