@@ -9,14 +9,24 @@
   },
   "plugins": [
     {
-      "name": "history",
-      "source": "history",
-      "description": "/history: summarize the session you are in with Haiku (goal, done, decisions, open, todo, what to remember); later runs send only what came after"
+      "name": "summary",
+      "source": "summary",
+      "description": "/summary: summarize the session you are in with Haiku (goal, done, decisions, open, todo, what to remember); later runs send only what came after"
     },
     {
-      "name": "fork-origin",
-      "source": "fork-origin",
+      "name": "see-parent",
+      "source": "see-parent",
       "description": "After /fork, the session you forked from stays open in a pane: read it, and keep talking to it"
+    },
+    {
+      "name": "call",
+      "source": "call",
+      "description": "/call: pick an installed AI CLI (claude, codex, agy, opencode) and chat with it in a side pane, in the folder you work in"
+    },
+    {
+      "name": "replay-theater",
+      "source": "replay-theater",
+      "description": "/replay: step through the file edits Claude made in the last turn, one diff at a time (from anthropics/claude-code-playground, Apache-2.0)"
     }
   ]
 }

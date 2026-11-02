@@ -1,0 +1,7 @@
+{
+  "name": "see-parent",
+  "version": "0.1.0",
+  "description": "After /fork, the session you forked from stays open in a pane: read it, and keep talking to it",
+  "author": { "name": "leehogwang" },
+  "types": "./types/index.d.ts"
+}

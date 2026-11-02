@@ -1,4 +1,0 @@
-{"claude-code-bridge": {
-  "PreToolUse": [{"matcher": "*", "hooks": [{"command": "python3 hook.py", "timeout": 10}]}],
-  "PreInvocation": [{"command": "if [ -f \"$AGY_BRIDGE_INJECT\" ]; then python3 inject.py; else cat >/dev/null; echo '{}'; fi", "timeout": 30}]
-}}
