@@ -65,6 +65,26 @@ Try one without installing: `claude --plugin-dir ~/Claude-Plugins/plugins/summar
 - Type in the pane: the CLI runs one non-interactive turn (`claude -p`, `codex exec`, `agy -p`, `opencode run`) in the
   folder the session works in, and the next message continues the same conversation by its id.
 - Each CLI keeps its own chat and works on its own: start a task in codex, switch to claude, come back later (`⟳` on the tab means it is working).
+- The conversation of the Claude Code session you are in goes along: the first message to a CLI carries it as a file to read
+  (`~/.cache/claude-call/`). Every later message brings what happened in Claude Code since that CLI's last turn, so a CLI called
+  earlier is up to date the next time you ask it: your prompts, what you ran in your terminal, Claude's words, the commands Claude
+  ran, and every file it changed as a diff (no tool output). It is delivered with your next message to that CLI, not pushed while it idles.
+- You see the work on the way (commands, files read or changed, remarks between steps) while a CLI works. When it is done the steps
+  fold into one line (`▸ 작업 N단계`, click to unfold) above the answer, which is drawn as markdown.
+- Several CLIs work at once: ask agy, switch to codex and ask it too; neither is interrupted. A CLI that finishes while another tab is
+  shown gets a yellow tab until you open it.
+- **Permission first:** every message to an agent starts with a ground rule: before changing code or files, running a command that
+  changes something, or doing anything hard to undo, say the plan and wait for your go-ahead (your next message answers). Reading and
+  explaining need none. The CLIs run in yolo mode, so this rule in the prompt is the only gate; it is a request the model follows, not a lock.
+- **File flags:** the files an agent is changing show in the pane (`✎ dir/file.py  codex`), set as its steps stream in and lifted when its
+  turn ends. Two agents on one file show a red `⚠`. Agents are told which files others hold when you message them, and the Claude Code
+  session itself is refused an Edit or Write on a flagged file (its own edits are flagged for the agents too, until its turn ends).
+  Limits: an agent's own write cannot be stopped from here, and codex reports a change only after it is made.
+- Every CLI has its own **model** and **effort**, shown under the tabs. **model** is a dropdown: click it (or focus it and press Enter), then click a model;
+  **effort** is a slider (`-o---: low`, `--o--: medium`): click or drag along the track. The colour says it at a glance:
+  effort runs green (low) to red (max), grey is the CLI's default. agy lists each model once (Gemini 4 Argon, Gemini 3.8 Flash,
+  Claude Opus 5.5, Claude Sonnet 5.5, GPT-OSS 120B) and offers only the efforts that model has; the two are joined into agy's own id
+  when it runs. Typing `/model` or `/effort` in the pane lists the choices; `/model <name>`, `/effort <level>` and `default` set and clear them.
 - It is a chat, not a terminal: slash commands, the full-screen UI, approval prompts and Esc do not work in the pane.
   A turn cannot ask you to approve a tool, so every CLI runs in yolo mode: no approval prompts, no sandbox where the CLI has one
   (`--dangerously-skip-permissions`, codex `--dangerously-bypass-approvals-and-sandbox`, opencode `--auto`). They can edit files and run commands in the working folder without asking. "터미널에서 열기" shows the

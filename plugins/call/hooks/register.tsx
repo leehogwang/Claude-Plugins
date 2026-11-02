@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { Chat, Chats } from '../types'
+import type { Chat, Chats, Model } from '../types'
 
 // /call lists the AI CLIs installed here and opens one in a side pane. Like see-parent, the pane is a
 // chat: each message runs one non-interactive turn of that CLI (`claude -p`, `codex exec`, ...) in the
@@ -12,23 +12,72 @@ const PANE = 'call'
 const CLIS = ['claude', 'codex', 'agy', 'opencode'] // ponytail: fixed list, add a CLI = one line here + one case in argv() and parse()
 const SHOWN = 40 // the latest messages drawn
 
-const state = atom({ plugin: 'call', key: 'chats' } as const, { found: [], active: '', hint: false, chats: {} } as Chats)
-const blank: Chat = { sid: '', turns: [], reply: '', running: false, error: '' }
+const state = atom({ plugin: 'call', key: 'chats' } as const, { flags: {}, found: [], models: {}, active: '', hint: false, menu: false, chats: {} } as Chats)
+const blank: Chat = { sid: '', seen: 0, model: '', effort: '', draft: '', turns: [], steps: [], running: false, unread: false, error: '' }
 
 const patch = ($: EngineInterface, cli: string, f: (c: Chat) => Chat) =>
   update($, state, s => ({ ...s, chats: { ...s.chats, [cli]: f(s.chats[cli] ?? blank) } }))
 
 const uuid = () => globalThis.crypto?.randomUUID?.() ?? 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => ((Math.random() * 16) | 0).toString(16))
 
+const EFFORTS: Record<string, string[]> = {
+  claude: ['low', 'medium', 'high', 'xhigh', 'max'],
+  codex: ['low', 'medium', 'high', 'xhigh', 'max'],
+  opencode: ['minimal', 'high', 'max'], // opencode calls it a model "variant"
+  agy: ['low', 'medium', 'high', 'xhigh', 'max'],
+}
+
+// --model and the effort flag, which each CLI spells its own way ('' leaves the CLI's default).
+// agy has no separate effort for a chosen model: its model ids end in -low/-medium/-high, so the two are joined here.
+function opts(cli: string, model: string, effort: string, allowed: string[]): string[] {
+  if (cli === 'agy' && model) return ['--model', `${model}-${effort || (allowed.includes('medium') ? 'medium' : allowed[0] ?? 'medium')}`]
+  const m = model ? [cli === 'codex' || cli === 'opencode' ? '-m' : '--model', model] : []
+  const e = !effort ? [] : cli === 'codex' ? ['-c', `model_reasoning_effort="${effort}"`] : cli === 'opencode' ? ['--variant', effort] : ['--effort', effort]
+  return [...m, ...e]
+}
+
+// the efforts to offer: the chosen model's own (agy), else the CLI's
+const effortsFor = (cli: string, models: Model[], model: string) => models.find(m => m.id === model)?.efforts.length ? models.find(m => m.id === model)!.efforts : EFFORTS[cli] ?? []
+
 // The command for one turn. claude takes the id up front; the others tell it in their output (see parse).
-function argv(cli: string, sid: string, text: string): string[] {
+function argv(cli: string, sid: string, text: string, o: string[]): string[] {
   // yolo: no approval prompts, since a turn here has nobody to answer them (a choice the owner made on purpose)
   switch (cli) {
-    case 'claude': return sid ? ['claude', '-p', '--dangerously-skip-permissions', '--resume', sid, text] : ['claude', '-p', '--dangerously-skip-permissions', '--session-id', uuid(), text]
-    case 'codex': return sid ? ['codex', 'exec', 'resume', '--dangerously-bypass-approvals-and-sandbox', '--json', sid, text] : ['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', '--json', text]
-    case 'opencode': return sid ? ['opencode', 'run', '--auto', '--format', 'json', '-s', sid, text] : ['opencode', 'run', '--auto', '--format', 'json', text]
-    default: return sid ? ['agy', '-p', text, '--dangerously-skip-permissions', '--output-format', 'json', '--conversation', sid] : ['agy', '-p', text, '--dangerously-skip-permissions', '--output-format', 'json']
+    case 'claude': return sid ? ['claude', '-p', '--dangerously-skip-permissions', '--output-format', 'stream-json', '--verbose', ...o, '--resume', sid, text] : ['claude', '-p', '--dangerously-skip-permissions', '--output-format', 'stream-json', '--verbose', ...o, '--session-id', uuid(), text]
+    case 'codex': return sid ? ['codex', 'exec', 'resume', '--dangerously-bypass-approvals-and-sandbox', ...o, '--json', sid, text] : ['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', ...o, '--json', text]
+    case 'opencode': return sid ? ['opencode', 'run', '--auto', ...o, '--format', 'json', '-s', sid, text] : ['opencode', 'run', '--auto', ...o, '--format', 'json', text]
+    default: return sid ? ['agy', '-p', text, '--dangerously-skip-permissions', ...o, '--output-format', 'stream-json', '--conversation', sid] : ['agy', '-p', text, '--dangerously-skip-permissions', ...o, '--output-format', 'stream-json']
   }
+}
+
+// The models a CLI offers, asked once and kept. agy lists one row per effort ("gemini-3.8-flash-low", "-medium", ...):
+// those are folded into one model whose efforts are the suffixes.
+async function modelsOf($: EngineInterface, cli: string): Promise<Model[]> {
+  const known = (await read($, state)).models[cli]
+  if (known) return known
+  let list: Model[] = []
+  const plain = (ids: string[]) => ids.map(id => ({ id, label: id, efforts: [] }))
+  if (cli === 'claude') list = plain(['opus', 'sonnet', 'haiku'])
+  else {
+    const r = await $.process.run(cli === 'codex' ? ['codex', 'debug', 'models'] : [cli, 'models'], { timeoutMs: 60_000 }).catch(() => undefined)
+    if (r?.exitCode === 0) {
+      if (cli === 'codex') list = plain(((json(r.stdout)?.models ?? []) as { slug: string; visibility?: string }[]).filter(m => m.visibility === 'list').map(m => m.slug))
+      else if (cli === 'opencode') list = plain(r.stdout.split('\n').map(l => l.trim()).filter(l => l && !l.includes(' ')))
+      else
+        for (const line of r.stdout.split('\n')) {
+          const [id = '', label = id] = line.split('\t').map(x => x.trim())
+          const tail = /-(low|medium|high|xhigh|max)$/.exec(id)
+          if (!id || id.includes(' ') || !tail) continue
+          const base = id.slice(0, -tail[0].length)
+          const found = list.find(m => m.id === base)
+          if (found) found.efforts.push(tail[1]!)
+          else list.push({ id: base, label: label.replace(/\s*\([^)]*\)\s*$/, ''), efforts: [tail[1]!] })
+        }
+      for (const m of list) m.efforts.sort((a, b) => EFFORTS.agy!.indexOf(a) - EFFORTS.agy!.indexOf(b))
+    }
+  }
+  await update($, state, s => ({ ...s, models: { ...s.models, [cli]: list } }))
+  return list
 }
 
 // What to type in a terminal to carry on the same conversation there, with every feature of the CLI.
@@ -36,28 +85,106 @@ function resumeCmd(cli: string, sid: string) {
   return { claude: `claude --resume ${sid}`, codex: `codex resume ${sid}`, opencode: `opencode -s ${sid}`, agy: `agy --conversation ${sid}` }[cli] ?? ''
 }
 
+// effort runs from cool to hot, models along a violet-pink ramp; "default" is grey
+const HOT = ['#50fa7b', '#f1fa8c', '#ffb86c', '#ff5555']
+const COOL = ['#8be9fd', '#bd93f9', '#ff79c6']
+function ramp(stops: string[], t: number) {
+  const p = Math.max(0, Math.min(1, t)) * (stops.length - 1)
+  const i = Math.min(stops.length - 2, Math.floor(p))
+  const [a, b] = [stops[i]!, stops[i + 1]!].map(h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16)))
+  return '#' + a!.map((v, k) => Math.round(v + (b![k]! - v) * (p - i)).toString(16).padStart(2, '0')).join('')
+}
+const colorAt = (stops: string[], at: number, n: number) => (at <= 0 ? 'gray' : ramp(stops, n <= 2 ? 0 : (at - 1) / (n - 2)))
+
 const json = (line: string): any => { try { return JSON.parse(line) } catch { return undefined } }
 
-// The answer and the conversation id out of what a CLI printed so far (it may stop mid-line).
-function parse(cli: string, out: string): { text: string; sid: string; error: string } {
-  if (cli === 'claude') return { text: out.trim(), sid: '', error: '' }
-  if (cli === 'agy') {
-    const r = json(out.trim())
-    return r ? { text: String(r.response ?? '').trim(), sid: r.conversation_id ?? '', error: r.status && r.status !== 'SUCCESS' ? String(r.status) : '' } : { text: '', sid: '', error: '' }
-  }
-  const texts: string[] = []
+// Flags on the files agents are changing, set as their steps stream in and lifted when their turn ends, so
+// that the pane shows who is on which file, warns when two are on the same one, and the Claude Code session
+// itself is kept off a flagged file. An agent's own write cannot be stopped from here (it is another process).
+const TOUCHES = /edit|write|replace|patch|create|apply/i // tool names that change a file
+const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit'])
+const pathOf = (o: any): string => String(o?.file_path ?? o?.filePath ?? o?.notebook_path ?? o?.TargetFile ?? o?.target_file ?? o?.Path ?? o?.path ?? '')
+
+const hold = ($: EngineInterface, who: string, files: string[]) =>
+  update($, state, s => {
+    const flags = { ...s.flags }
+    for (const f of files) if (!flags[f]?.includes(who)) flags[f] = [...(flags[f] ?? []), who]
+    return { ...s, flags }
+  })
+
+const free = ($: EngineInterface, who: string) =>
+  update($, state, s => {
+    const flags: Record<string, string[]> = {}
+    for (const [f, w] of Object.entries(s.flags)) if (w.some(x => x !== who)) flags[f] = w.filter(x => x !== who)
+    return { ...s, flags }
+  })
+
+const short = (p: string) => p.split('/').slice(-2).join('/')
+
+// what every message to an agent starts with: ask before changing anything, and keep off files others hold
+const RULES = 'Ground rules from the user: before you change code or files, run a command that changes something, or do anything hard to undo, say what you plan to do and wait for the user\'s go-ahead: end your turn with that question, the next message is the answer. Reading, searching and explaining need no permission. '
+const heldBy = (flags: Record<string, string[]>, me: string) => Object.keys(flags).filter(f => flags[f]!.some(w => w !== me))
+
+// one line for a tool call: its command, file or pattern
+const brief = (input: unknown) => {
+  const o = (input ?? {}) as Record<string, unknown>
+  const v = o.command ?? o.CommandLine ?? o.file_path ?? o.Path ?? o.path ?? o.filePath ?? o.pattern ?? o.query ?? o.url ?? Object.values(o).find(x => typeof x === 'string')
+  return String(v ?? '').replace(/\s+/g, ' ').slice(0, 100)
+}
+const tool = (name: string, input: unknown) => `${name}: ${brief(input)}`.replace(/: $/, '')
+
+// What a CLI printed so far (it may stop mid-line), as the answer, its conversation id, an error, and the steps
+// on the way (tool calls, and the remarks between them). Each CLI streams its own JSON lines; the answer is the last text.
+function parse(cli: string, out: string): { text: string; sid: string; error: string; steps: string[]; files: string[] } {
+  const files = new Set<string>() // the files its tool calls change
+  const items: { step?: string; text?: string }[] = []
   let sid = ''
+  let final = ''
+  let error = ''
+  const calls = new Set<number>()
+  const parts = new Map<number, string>() // agy: the words of each step, in pieces
   for (const e of out.split('\n').map(json)) {
     if (!e) continue
-    if (cli === 'codex') {
+    if (cli === 'claude') {
+      sid = e.session_id ?? sid
+      if (e.type === 'assistant') for (const b of e.message?.content ?? []) b.type === 'tool_use' ? (items.push({ step: tool(b.name, b.input) }), TOUCHES.test(b.name) && files.add(pathOf(b.input))) : b.type === 'text' && items.push({ text: b.text })
+      if (e.type === 'result') [final, error] = [e.result ?? '', e.is_error ? String(e.result) : '']
+    } else if (cli === 'codex') {
       sid = e.thread_id ?? sid
-      if (e.type === 'item.completed' && e.item?.type === 'agent_message') texts.push(e.item.text)
-    } else {
+      const it = e.item
+      if (e.type === 'item.started' && it?.type === 'command_execution') items.push({ step: '$ ' + String(it.command).replace(/^\/bin\/\w+ -lc /, '').replace(/^'(.*)'$/s, '$1').slice(0, 100) })
+      else if (e.type === 'item.started' && it?.type === 'mcp_tool_call') items.push({ step: `${it.server}.${it.tool}` })
+      else if (e.type === 'item.completed' && it?.type === 'file_change') {
+        items.push({ step: 'edit ' + (it.changes ?? []).map((c: { path: string }) => c.path).join(', ').slice(0, 100) })
+        for (const c of it.changes ?? []) files.add(c.path)
+      }
+      else if (e.type === 'item.completed' && it?.type === 'agent_message') items.push({ text: it.text })
+      if (e.type === 'turn.failed' || e.type === 'error') error = e.error?.message ?? e.message ?? 'failed'
+    } else if (cli === 'opencode') {
       sid = e.sessionID ?? sid
-      if (e.type === 'text') texts.push(e.part?.text ?? '')
+      if (e.type === 'tool_use' && e.part?.state?.status !== 'pending') (items.push({ step: tool(e.part.tool, e.part.state?.input) }), TOUCHES.test(e.part.tool) && files.add(pathOf(e.part.state?.input)))
+      else if (e.type === 'text') items.push({ text: e.part?.text ?? '' })
+      else if (e.type === 'error') error = e.error?.data?.message ?? e.error?.message ?? 'failed'
+    } else {
+      const u = e.step_update
+      sid = e.conversation_id ?? u?.conversation_id ?? e.result?.conversation_id ?? sid
+      if (u?.step_type === 'tool' && u.state === 'ACTIVE' && !calls.has(u.step_index)) {
+        calls.add(u.step_index)
+        items.push({ step: tool(u.tool_name, u.tool_info?.parameters) })
+        if (TOUCHES.test(u.tool_name)) files.add(pathOf(u.tool_info?.parameters))
+      } else if (u?.step_type === 'agent_response' && u.text_delta) {
+        parts.set(u.step_index, (parts.get(u.step_index) ?? '') + u.text_delta)
+        if (u.state === 'DONE') items.push({ text: parts.get(u.step_index)!.trim() })
+      }
+      if (e.event === 'result') [final, error] = [e.result?.response ?? '', e.result?.status && e.result.status !== 'SUCCESS' ? String(e.result.status) : '']
     }
   }
-  return { text: texts.join('\n\n').trim(), sid, error: '' }
+  const texts = items.filter(i => i.text?.trim())
+  const text = (final || texts.at(-1)?.text || '').trim()
+  const last = final ? undefined : texts.at(-1) // the remarks before the answer are steps too
+  const steps = items.filter(i => i !== last).map(i => i.step ?? '· ' + i.text!.trim().split('\n')[0]!.slice(0, 100)).filter(x => x.trim() !== '·')
+  files.delete('')
+  return { text, sid, error, steps, files: [...files] }
 }
 
 async function find($: EngineInterface) {
@@ -67,14 +194,37 @@ async function find($: EngineInterface) {
   return found
 }
 
+// /model and /effort typed in the pane: show the choices, or set one for this CLI's chat ("default" clears it)
+async function setting($: EngineInterface, cli: string, what: string, value: string) {
+  const say = (t: string) => patch($, cli, c => ({ ...c, error: '', turns: [...c.turns, { who: 'user', text: `/${what}${value ? ` ${value}` : ''}` }, { who: 'ai', text: t }] }))
+  const models = await modelsOf($, cli)
+  const chat = (await read($, state)).chats[cli] ?? blank
+  const names = what === 'model' ? models.map(m => (m.label === m.id ? m.id : `${m.label} (${m.id})`)) : effortsFor(cli, models, chat.model)
+  if (!value) return say(`${what}: ${chat[what as 'model' | 'effort'] || 'default'}\navailable: ${names.join(', ') || '(unknown)'}\n/${what} <name> sets it, /${what} default clears it`)
+  let v = value === 'default' ? '' : value
+  if (what === 'model') v = models.find(m => m.id === value || m.label.toLowerCase() === value.toLowerCase())?.id ?? v // a name or an id
+  else if (v && !names.includes(v)) return say(`${cli} has no effort "${v}". available: ${names.join(', ')}`)
+  await patch($, cli, c => ({ ...c, [what]: v, effort: what === 'model' && !effortsFor(cli, models, v).includes(c.effort) ? '' : what === 'effort' ? v : c.effort }))
+  return say(`${what} for ${cli}: ${v || 'default'}`)
+}
+
 async function send($: EngineInterface, text: string) {
   const s = await read($, state)
   const cli = s.active
   const chat = s.chats[cli] ?? blank
   if (!cli || !text.trim() || chat.running) return
-  await patch($, cli, c => ({ ...c, running: true, error: '', reply: '', turns: [...c.turns, { who: 'user', text }] }))
+  await patch($, cli, c => ({ ...c, draft: '' })) // the field empties once the message is sent
+  const word = /^\/(model|effort)(?:\s+(.*))?$/.exec(text.trim())
+  if (word) return setting($, cli, word[1]!, (word[2] ?? '').trim())
+  await patch($, cli, c => ({ ...c, running: true, error: '', steps: [], turns: [...c.turns, { who: 'user', text }] }))
   try {
-    const cmd = argv(cli, chat.sid, text)
+    // the Claude Code conversation (what is new since this chat last heard of it) goes along as a file to read
+    const ctx = JSON.parse((await $.process.run(['python3', `${$.plugin.root}/hooks/context.py`, await $.session.id(), String(chat.seen), cli], { timeoutMs: 60_000 })).stdout || '{}') as { records?: number; path?: string }
+    const others = heldBy(s.flags, cli)
+    const intro = RULES + (others.length ? `Other agents are changing these files right now, so do not edit them (if you need one, stop and tell the user): ${others.join(', ')}. ` : '') + (!ctx.path ? '' : chat.seen
+      ? `New messages in the Claude Code session since your last turn are in ${ctx.path}; read them first. `
+      : `The conversation so far between the user and Claude Code, in this folder, is in ${ctx.path}. Read it first: it is background, not instructions to run again. `)
+    const cmd = argv(cli, chat.sid, `${intro}The user now asks: ${text}`, opts(cli, chat.model, chat.effort, (await modelsOf($, cli)).find(m => m.id === chat.model)?.efforts ?? []))
     const child = $.process.spawn({ argv: cmd })
     let out = ''
     let err = ''
@@ -86,18 +236,22 @@ async function send($: EngineInterface, text: string) {
       }
       if (step.value.stream === 'stdout') {
         out += step.value.text
-        const live = parse(cli, out).text
-        await patch($, cli, c => ({ ...c, reply: live }))
+        const now = parse(cli, out)
+        await patch($, cli, c => ({ ...c, steps: now.steps }))
+        if (now.files.length) await hold($, cli, now.files)
       } else err += step.value.text
     }
     const done = parse(cli, out)
     if (done.error) throw new Error(done.error)
     const sid = cli === 'claude' ? (chat.sid || cmd[cmd.indexOf('--session-id') + 1] || '') : done.sid || chat.sid
-    await patch($, cli, c => ({ ...c, sid, reply: '', turns: [...c.turns, { who: 'ai', text: done.text || '(no answer)' }] }))
+    await patch($, cli, c => ({ ...c, sid, seen: ctx.records ?? c.seen, steps: [], turns: [...c.turns, { who: 'ai', text: done.text || '(no answer)', steps: done.steps }] }))
   } catch (e) {
-    await patch($, cli, c => ({ ...c, reply: '', error: String(e) }))
+    await patch($, cli, c => ({ ...c, steps: [], error: String(e) }))
   } finally {
-    await patch($, cli, c => ({ ...c, running: false }))
+    // finished while another tab is shown: mark this one so it can be seen
+    await free($, cli)
+    const shown = (await read($, state)).active === cli
+    await patch($, cli, c => ({ ...c, running: false, unread: !shown }))
   }
 }
 
@@ -107,19 +261,50 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // the Claude Code session keeps off a file an agent here holds, and flags the files it changes itself
+  on('tool.call', async ($, e, next) => {
+    const file = EDIT_TOOLS.has(e.tool) ? pathOf(e) : ''
+    if (file) {
+      const owners = ((await read($, state)).flags[file] ?? []).filter(w => w !== 'main')
+      if (owners.length) return { deny: `${file} is being changed by ${owners.join(', ')} in the /call pane right now. Wait until they are done, or ask the user.` }
+      await hold($, 'main', [file])
+    }
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    if (!e.agentId) await free($, 'main')
+    return next(e)
+  })
+
   on('command.run', { command: 'call' }, async ($, e) => {
     const found = await find($)
     if (!found.length) return { text: `No AI CLI found (looked for ${CLIS.join(', ')}).` }
     const want = e.args.trim()
     if (want && !found.includes(want)) return { text: `${want} is not installed here. Installed: ${found.join(', ')}.` }
     if (want) await update($, state, s => ({ ...s, active: want }))
+    await patch($, (await read($, state)).active, c => ({ ...c, unread: false }))
     await $.ui.open({ id: PANE, title: 'Call' })
+    void modelsOf($, (await read($, state)).active) // for the model slider
     return { text: `Call pane open. Installed: ${found.join(', ')}.` }
+  })
+
+  // the effort slider: {set: index} from a click or drag on its track
+  on('ui.message', async ($, e, next) => {
+    if (e.requestId !== PANE || e.element !== 'slider-effort') return next(e)
+    const set = (e.data as { set?: unknown } | null)?.set
+    if (typeof set === 'number') {
+      const s = await read($, state)
+      const levels = ['', ...effortsFor(s.active, s.models[s.active] ?? [], s.chats[s.active]?.model ?? '')]
+      const v = levels[Math.max(0, Math.min(levels.length - 1, Math.round(set)))] ?? ''
+      await patch($, s.active, c => ({ ...c, effort: v }))
+    }
+    return {}
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
-    const { Box, Button, Text } = ui
+    const { Box, Button, Client, Markdown, Text } = ui
     const s = await read($, state)
     const cli = s.active
     const chat = s.chats[cli] ?? blank
@@ -128,38 +313,95 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Box flexDirection="row" columnGap={1}>
-          {s.found.map(c => (
-            <Button key={`tab-${c}`} label={c === cli ? `[${c}]${mark(c)}` : `${c}${mark(c)}`} plain dimColor={c !== cli} onPress={() => update($, state, v => ({ ...v, active: c, hint: false }))} />
-          ))}
+          {s.found.map(c => {
+            const new_ = c !== cli && s.chats[c]?.unread // an answer came in while another tab was shown: yellow
+            const label = `${c === cli ? `[${c}]` : c}${mark(c)}`
+            return (
+              <Button key={`tab-${c}`} label={new_ ? undefined : label} plain dimColor={c !== cli && !new_} onPress={() => { void modelsOf($, c); return update($, state, v => ({ ...v, active: c, hint: false, menu: false, chats: { ...v.chats, [c]: { ...(v.chats[c] ?? blank), unread: false } } })) }}>
+                {new_ ? <Text backgroundColor="yellow" color="black">{label}</Text> : undefined}
+              </Button>
+            )
+          })}
           {chat.sid && <Button key="terminal" label="터미널에서 열기" plain dimColor onPress={() => update($, state, v => ({ ...v, hint: !v.hint }))} />}
         </Box>
+        {cli && (() => {
+          const models = s.models[cli] ?? []
+          const at = Math.max(0, models.findIndex(m => m.id === chat.model) + 1)
+          const levels = ['', ...effortsFor(cli, models, chat.model)]
+          const lv = Math.max(0, levels.indexOf(chat.effort))
+          const color = colorAt(HOT, lv, levels.length)
+          const len = Math.min(levels.length, 20)
+          return (
+            <Box flexDirection="column">
+              <Box flexDirection="row">
+                <Box width={8} flexShrink={0}>
+                  <Text dimColor>model</Text>
+                </Box>
+                <Text color={colorAt(COOL, at, models.length + 1)}>● </Text>
+                <Button key="model" label={`${models.find(m => m.id === chat.model)?.label ?? (chat.model || 'default')} ${s.menu ? '▴' : '▾'}`} plain onPress={() => update($, state, v => ({ ...v, menu: !v.menu }))} />
+              </Box>
+              <Box flexDirection="row">
+                <Box width={8} flexShrink={0}>
+                  <Text dimColor>effort</Text>
+                </Box>
+                <Client key="slider-effort" module="./slider.tsx" props={{ levels: levels.length, at: lv, len, color }} width={len} height={1} />
+                <Text dimColor>: </Text>
+                <Text bold color={color}>{levels[lv] || 'default'}</Text>
+              </Box>
+              {s.menu && (
+                <Box flexDirection="column" marginLeft={8}>
+                  {[{ id: '', label: 'default' }, ...models].map(m => (
+                    <Button
+                      key={`m:${m.id}`}
+                      label={`${m.id === chat.model ? '●' : '○'} ${m.label}`}
+                      plain
+                      dimColor={m.id !== chat.model}
+                      onPress={() => update($, state, v => ({ ...v, menu: false })).then(() => patch($, cli, c => ({ ...c, model: m.id, effort: effortsFor(cli, models, m.id).includes(c.effort) ? c.effort : '' })))}
+                    />
+                  ))}
+                </Box>
+              )}
+            </Box>
+          )
+        })()}
+        {Object.entries(s.flags).slice(0, 8).map(([p, who]) => (
+          <Text color={who.length > 1 ? 'red' : 'yellow'}>{who.length > 1 ? `⚠ ${short(p)}  ${who.join(' + ')}가 동시에 수정 중` : `✎ ${short(p)}  ${who[0]}`}</Text>
+        ))}
         {s.hint && chat.sid ? <Text color="yellow">{resumeCmd(cli, chat.sid)}</Text> : null}
         {!cli && <Text dimColor>/call 로 설치된 AI를 찾습니다.</Text>}
         {chat.turns.length > SHOWN && <Text dimColor>{`… ${chat.turns.length - SHOWN} earlier messages`}</Text>}
-        {turns.map(t => (
-          <Box flexDirection="row" marginTop={1}>
-            <Box width={4} flexShrink={0}>
-              <Text bold color={t.who === 'user' ? 'cyan' : 'green'}>{t.who === 'user' ? '나' : cli[0]!.toUpperCase()}</Text>
+        {turns.map((t, k) => {
+          const at = chat.turns.length - turns.length + k
+          return (
+            <Box flexDirection="row" marginTop={1}>
+              <Box width={4} flexShrink={0}>
+                <Text bold color={t.who === 'user' ? 'cyan' : 'green'}>{t.who === 'user' ? '나' : cli[0]!.toUpperCase()}</Text>
+              </Box>
+              <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+                {t.steps?.length ? (
+                  <Button key={`steps-${at}`} label={`${t.open ? '▾' : '▸'} 작업 ${t.steps.length}단계`} plain dimColor onPress={() => patch($, cli, c => ({ ...c, turns: c.turns.map((x, i) => (i === at ? { ...x, open: !x.open } : x)) }))} />
+                ) : null}
+                {t.open && t.steps?.map(x => <Text dimColor>{`  ${x}`}</Text>)}
+                {t.who === 'ai' ? <Markdown text={t.text} /> : <Text>{t.text}</Text>}
+              </Box>
             </Box>
-            <Box flexGrow={1} flexShrink={1}>
-              <Text>{t.text}</Text>
-            </Box>
-          </Box>
-        ))}
+          )
+        })}
         {chat.running && (
           <Box flexDirection="row" marginTop={1}>
             <Box width={4} flexShrink={0}>
               <Text bold color="green">{cli[0]!.toUpperCase()}</Text>
             </Box>
-            <Box flexGrow={1} flexShrink={1}>
-              <Text dimColor>{chat.reply || `⟳ ${cli} 작업 중…`}</Text>
+            <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+              {chat.steps.slice(-10).map(x => <Text dimColor>{`  ${x}`}</Text>)}
+              <Text dimColor>{`⟳ ${cli} 작업 중…`}</Text>
             </Box>
           </Box>
         )}
         {chat.error ? <Text color="red">{chat.error}</Text> : null}
         {cli && 'Input' in ui && (
           <Box marginTop={1}>
-            <ui.Input key="ask" placeholder={chat.running ? `${cli}가 답하는 중…` : `${cli}에게 보내기 (Enter)`} submitLabel="보내기" onSubmit={(text: string) => send($, text)} />
+            <ui.Input key="ask" value={chat.draft} onInput={(v: string) => patch($, cli, c => ({ ...c, draft: v }))} placeholder={chat.running ? `${cli}가 답하는 중…` : `${cli}에게 보내기 (Enter)`} submitLabel="보내기" onSubmit={(text: string) => { void send($, text) }} />
           </Box>
         )}
       </Box>
