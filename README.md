@@ -131,7 +131,7 @@ the real error before reporting.
 - Bump `version` in its `.claude-plugin/plugin.json` when behaviour changes, so installed copies update.
 - Keep its tests passing; add one for the behaviour you change.
 - A change to the `summary` summary prompt (`SYSTEM` in `plugins/summary/hooks/register.tsx`) must also bump
-  the store key (`summary:vN:`, now v9) so old summaries made with the previous prompt are not reused.
+  the store key (`summary:vN:`, now v10) so old summaries made with the previous prompt are not reused.
 
 ### Rules for this repository
 

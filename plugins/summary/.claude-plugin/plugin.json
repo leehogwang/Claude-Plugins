@@ -1,6 +1,6 @@
 {
   "name": "summary",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "/summary: summarize the session you are in with Haiku; later runs send only what came after",
   "types": "./types/index.d.ts",
   "author": {

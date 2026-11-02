@@ -1,4 +1,4 @@
-import sys, os, json, glob, re
+import sys, os, json, glob, re, html
 
 # <session id> [from]: a header line {"mtime", "records", "chunks"}, then the conversation from record `from` on,
 # as text: every prompt and everything Claude wrote (no tool output). Long ones come in chunks split by \f.
@@ -20,6 +20,13 @@ def prompt_of(m):
     if cmd:
         if cmd.group(1) in ('/clear', '/model', '/effort', '/config', '/status', '/cost', '/exit', '/resume'): return None  # housekeeping
         return f'{cmd.group(1)} {cmd.group(2)}'.strip()
+    # what the person ran themselves with `!` and what it printed: it settles open items, so the summary needs it
+    sh = re.search(r'<bash-input>(.*?)</bash-input>', c, re.S)
+    if sh: return 'ran in their terminal: ' + sh.group(1).strip()[:300]
+    out = re.search(r'<bash-stdout>(.*?)</bash-stdout>\s*<bash-stderr>(.*?)</bash-stderr>', c, re.S)
+    if out:
+        t = html.unescape(re.sub(r'\x1b\[[0-9;]*m', '', (out.group(1) + out.group(2)).strip()))
+        return 'its output: ' + (t[-400:] if t else '(nothing)')
     if c.startswith('<'): return None  # system notices, task notifications
     return re.sub(r'<pasted_content.*?</pasted_content[^>]*>', '[pasted text]', c, flags=re.S).strip()
 
