@@ -134,17 +134,17 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Box flexDirection="row" columnGap={1}>
-          <Text bold color="magenta">원본 세션</Text>
+          <Text bold color="magenta">Original session</Text>
           <Text dimColor>{o.id ? o.id.slice(0, 8) : ''}</Text>
-          <Button key="refresh" label="새로고침" plain dimColor onPress={() => o.id && load($, o.id)} />
-          <Button key="terminal" label="터미널에서 열기" plain dimColor onPress={() => update($, hint, h => !h)} />
+          <Button key="refresh" label="Refresh" plain dimColor onPress={() => o.id && load($, o.id)} />
+          <Button key="terminal" label="Open in terminal" plain dimColor onPress={() => update($, hint, h => !h)} />
         </Box>
         {(await read($, hint)) && o.id ? <Text color="yellow">{`claude --resume ${o.id}`}</Text> : null}
         {o.turns.length > SHOWN && <Text dimColor>{`… ${o.turns.length - SHOWN} earlier messages`}</Text>}
         {turns.map(t => (
           <Box flexDirection="row" marginTop={1}>
             <Box width={4} flexShrink={0}>
-              <Text bold color={t.who === 'user' ? 'cyan' : 'green'}>{t.who === 'user' ? '나' : 'C'}</Text>
+              <Text bold color={t.who === 'user' ? 'cyan' : 'green'}>{t.who === 'user' ? 'You' : 'C'}</Text>
             </Box>
             <Box flexGrow={1} flexShrink={1}>
               <Text>{t.text}</Text>
@@ -157,14 +157,14 @@ export const register: Register = on => {
               <Text bold color="green">C</Text>
             </Box>
             <Box flexGrow={1} flexShrink={1}>
-              <Text dimColor>{live || '⟳ 원본 세션이 작업 중…'}</Text>
+              <Text dimColor>{live || '⟳ The original session is working…'}</Text>
             </Box>
           </Box>
         )}
         {failed ? <Text color="red">{failed}</Text> : null}
         {o.id && 'Input' in ui && (
           <Box marginTop={1}>
-            <ui.Input key="ask" value={await read($, draft)} onInput={(v: string) => update($, draft, () => v)} placeholder={busy ? '원본이 답하는 중…' : '원본 세션에게 보내기 (Enter)'} submitLabel="보내기" onSubmit={(text: string) => send($, text)} />
+            <ui.Input key="ask" value={await read($, draft)} onInput={(v: string) => update($, draft, () => v)} placeholder={busy ? 'The original is answering…' : 'Send to the original session (Enter)'} submitLabel="send" onSubmit={(text: string) => send($, text)} />
           </Box>
         )}
       </Box>
