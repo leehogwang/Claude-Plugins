@@ -31,11 +31,12 @@ function world(on: Parameters<Parameters<typeof test>[1]>[1]) {
   on('tool.call', () => ({ result: 'ok' }) as never) // what the tool itself would answer
   on('session.start', (_$: unknown, e: unknown) => ({ cwd: (e as { cwd: string }).cwd }) as never) // core's part of entering a session
   on('command.register', () => ({ value: {} }) as never)
-  const state = { records: 7 }
+  const state = { records: 7, chars: 100, fail: false }
   on('process.run', (_$: unknown, e: unknown) => {
     const argv = (e as { argv: string[] }).argv
     const ok = (stdout: string) => ({ value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
-    if (argv[0] === 'python3') return ok(JSON.stringify({ records: state.records, path: argv[4] === 'claude' && argv[3] !== '0' ? '' : `/ctx/${argv[4]}-${argv[3]}.md` }))
+    if (argv[0] === 'python3' && state.fail) return { value: { exitCode: 1, stdout: '', stderr: 'no transcript for session sess-1', isStdoutTruncated: false, isStderrTruncated: false } }
+    if (argv[0] === 'python3') return ok(JSON.stringify({ records: state.records, path: argv[4] === 'claude' && argv[3] !== '0' ? '' : `/ctx/${argv[4]}-${argv[3]}.md`, diffs: `/ctx/${argv[4]}-${argv[3]}.diff.md`, chars: state.chars, notes: '/ctx/notes.md' }))
     if (argv[0] === 'agy' && argv[1] === 'models') {
       const rows = ['gemini-3.8-flash-high\tGemini 3.8 Flash (High)', 'gemini-3.8-flash-low\tGemini 3.8 Flash (Low)', 'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)', 'gpt-oss-120b-medium\tGPT-OSS 120B (Medium)']
       return ok('Fetching available models...\n' + rows.join('\n'))
@@ -69,16 +70,17 @@ test('/call finds the installed CLIs; each message runs one turn, the next conti
   const ui = await mount($)
 
   await ui.input({ key: 'ask', text: '안녕' })
-  expect(spawned[0]!.slice(0, 5)).toEqual(['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', '--json', expect.stringContaining('/ctx/codex-0.md')])
+  expect(spawned[0]!.slice(0, 5)).toEqual(['codex', 'exec', '--dangerously-bypass-approvals-and-sandbox', '-c', 'model_reasoning_effort="medium"'])
+  expect(spawned[0]!.at(-1)).toContain('/ctx/codex-0.md')
   expect(spawned[0]!.at(-1)).toContain('The user now asks: 안녕')
   expect(await ui.find({ type: 'Markdown', text: /codex says hi/ })).toBeDefined() // the answer is drawn as markdown
   expect(JSON.stringify(await ui.find({ type: 'Input' } as never))).toContain('"value":""') // the field is empty again after sending
 
   state.records = 9 // Claude Code went on meanwhile: the next message brings what is new
   await ui.input({ key: 'ask', text: '또' })
-  expect(spawned[1]!.slice(0, 5)).toEqual(['codex', 'exec', 'resume', '--dangerously-bypass-approvals-and-sandbox', '--json'])
+  expect(spawned[1]!.slice(0, 5)).toEqual(['codex', 'exec', 'resume', '--dangerously-bypass-approvals-and-sandbox', '-c'])
   expect(spawned[1]).toContain('cx-1')
-  expect(spawned[1]!.at(-1)).toContain('New messages')
+  expect(spawned[1]!.at(-1)).toContain('The new messages')
   expect(spawned[1]!.at(-1)).toContain('/ctx/codex-7.md')
 
   await ui.press({ key: 'tab-claude' })
@@ -110,20 +112,20 @@ test('one CLI keeps working while another is asked; the one that finished unseen
 
   const slow = ui.input({ key: 'ask', text: 'slow one' }) // agy starts and does not finish yet
   await tick()
-  expect(await dump(ui, { type: 'Button', key: 'tab-agy' })).toContain('⟳')
+  expect(await dump(ui, { type: 'Button', key: 'tab-agy' })).toContain('#1f4e8c')
   await ui.press({ key: 'tab-codex' })
   await ui.input({ key: 'ask', text: 'fast one' }) // codex is asked meanwhile and answers
   expect(spawned.map(a => a[0])).toEqual(['agy', 'codex'])
   expect(await ui.find({ type: 'Markdown', text: /codex says hi/ })).toBeDefined()
-  expect(await dump(ui, { type: 'Button', key: 'tab-agy' })).not.toContain('yellow')
+  expect(await dump(ui, { type: 'Button', key: 'tab-agy' })).not.toContain('#e5c07b')
 
   release() // agy finishes while codex is the one shown
   await slow
   await tick(150)
-  expect(await dump(ui, { type: 'Button', key: 'tab-agy' })).toContain('yellow')
+  expect(await dump(ui, { type: 'Button', key: 'tab-agy' })).toContain('#e5c07b')
   await ui.press({ key: 'tab-agy' })
   expect(await ui.find({ type: 'Markdown', text: /agy says hi/ })).toBeDefined()
-  expect(await dump(ui, { type: 'Button', key: 'tab-agy' })).not.toContain('yellow')
+  expect(await dump(ui, { type: 'Button', key: 'tab-agy' })).not.toContain('#e5c07b')
 })
 
 test('model, effort: typed in the pane, picked from the list, stepped with the arrows', async ($, on) => {
@@ -242,4 +244,52 @@ test('a button at the very top goes to the bottom, one at the very bottom goes t
   expect(at('to-end')).toBeGreaterThan(-1)
   expect(at('to-end')).toBeLessThan(at('model')) // first, in the row of tabs
   expect(at('to-start')).toBeGreaterThan(at('ask')) // last, below the input
+})
+
+test('math with an exponent is drawn as plain text; the effort shown is the effort sent; the whole context goes, long ones to be summarised, diffs in full', async ($, on) => {
+  const { spawned, state } = world(on)
+  const saved = OUT.codex
+  OUT.codex = j({ type: 'thread.started', thread_id: 'cx-7' }, { type: 'item.completed', item: { type: 'agent_message', text: 'so $x^2$, $a^{10}$, $e^{-x}$ and $x^{n+1}$ and $x^2 + y^2 = z^2$' } })
+  await $.command.run({ command: 'call', args: 'codex' } as never)
+  const ui = await mount($)
+  await ui.input({ key: 'ask', text: 'go' })
+  OUT.codex = saved
+  const md = JSON.stringify(await ui.find({ type: 'Markdown', text: /so / }))
+  expect(md).toContain('x²')
+  expect(md).toContain('a¹⁰')
+  expect(md).not.toContain('$x')
+  expect(spawned[0]!.join(' ')).toContain('model_reasoning_effort=\"medium\"') // unset: medium is shown, so medium is sent
+  expect(prompt(spawned[0]!)).toContain('/ctx/codex-0.diff.md')
+  expect(prompt(spawned[0]!)).toContain('never summarise')
+  expect(prompt(spawned[0]!)).not.toContain('write your own short summary')
+  state.chars = 70_000
+  await ui.input({ key: 'ask', text: 'again' })
+  expect(prompt(spawned[1]!)).toContain('write your own short summary')
+  expect(prompt(spawned[1]!)).toContain('/ctx/notes.md')
+})
+
+test('a summary is asked for once the conversation given since the last one adds up, not only when one turn is big; a failed read says so and can be retried', async ($, on) => {
+  const { spawned, state } = world(on)
+  await $.command.run({ command: 'call', args: 'codex' } as never)
+  const ui = await mount($)
+  state.chars = 20_000
+  for (const t of ['one', 'two', 'three']) {
+    await ui.input({ key: 'ask', text: t })
+    expect(prompt(spawned.at(-1)!)).not.toContain('write your own short summary') // 20k, 40k, 60k
+  }
+  await ui.input({ key: 'ask', text: 'four' })
+  expect(prompt(spawned.at(-1)!)).toContain('write your own short summary') // 80k given in all
+  expect(prompt(spawned.at(-1)!)).not.toContain('(add to the notes')
+  await ui.input({ key: 'ask', text: 'five' }) // summarised: counting starts again
+  expect(prompt(spawned.at(-1)!)).not.toContain('write your own short summary')
+
+  const n = spawned.length
+  state.fail = true
+  await ui.input({ key: 'ask', text: 'lost?' })
+  expect(spawned.length).toBe(n) // nothing was sent without the context
+  expect(await ui.find({ type: 'Text', text: /Could not read the Claude Code conversation/ })).toBeDefined()
+  state.fail = false
+  await ui.press({ key: 'retry' })
+  expect(spawned.length).toBe(n + 1)
+  expect(prompt(spawned.at(-1)!)).toContain('The user now asks: lost?')
 })

@@ -13,10 +13,14 @@ const CLIS = ['claude', 'codex', 'agy', 'opencode'] // ponytail: fixed list, add
 const SHOWN = 40 // the latest messages drawn
 
 const state = atom({ plugin: 'call', key: 'chats' } as const, { flags: {}, found: [], models: {}, active: '', hint: false, menu: false, chats: {} } as Chats)
-const blank: Chat = { sid: '', seen: 0, model: '', effort: '', draft: '', turns: [], steps: [], running: false, unread: false, error: '' }
+const blank: Chat = { sid: '', seen: 0, model: '', effort: '', draft: '', turns: [], steps: [], running: false, unread: false, error: '', failed: '', snap: '', pending: 0, noted: false }
 
 const patch = ($: EngineInterface, cli: string, f: (c: Chat) => Chat) =>
   update($, state, s => ({ ...s, chats: { ...s.chats, [cli]: f(s.chats[cli] ?? blank) } }))
+
+// what is typed in each CLI's field: kept here, not in state, so typing does not redraw the pane (a redraw with a stale value garbles the field)
+const drafts: Record<string, string> = {}
+const LONG = 60_000 // characters of conversation above which the called AI is told to summarise it
 
 const uuid = () => globalThis.crypto?.randomUUID?.() ?? 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => ((Math.random() * 16) | 0).toString(16))
 
@@ -37,6 +41,8 @@ function opts(cli: string, model: string, effort: string, allowed: string[]): st
 }
 
 // the efforts to offer: the chosen model's own (agy), else the CLI's
+// the effort that runs: the one chosen, else medium (else the lowest): what the pane shows is what is sent
+const pickEffort = (levels: string[], effort: string) => (levels.includes(effort) ? effort : levels.includes('medium') ? 'medium' : levels[0] ?? '')
 const effortsFor = (cli: string, models: Model[], model: string) => models.find(m => m.id === model)?.efforts.length ? models.find(m => m.id === model)!.efforts : EFFORTS[cli] ?? []
 
 // The command for one turn. claude takes the id up front; the others tell it in their output (see parse).
@@ -57,7 +63,7 @@ async function modelsOf($: EngineInterface, cli: string): Promise<Model[]> {
   if (known) return known
   let list: Model[] = []
   const plain = (ids: string[]) => ids.map(id => ({ id, label: id, efforts: [] }))
-  if (cli === 'claude') list = plain(['opus', 'sonnet', 'haiku'])
+  if (cli === 'claude') list = [['claude-opus-5-5', 'Opus 5.5'], ['claude-sonnet-5-5', 'Sonnet 5.5'], ['claude-haiku-5-5', 'Haiku 5.5'], ['claude-fable-5-1', 'Fable 5.1']].map(([id, label]) => ({ id: id!, label: label!, efforts: [] })) // exact ids, so the version shows and is what runs (Fable needs usage credits)
   else {
     const r = await $.process.run(cli === 'codex' ? ['codex', 'debug', 'models'] : [cli, 'models'], { timeoutMs: 60_000 }).catch(() => undefined)
     if (r?.exitCode === 0) {
@@ -125,6 +131,19 @@ let columns = 60 // the pane's width, as the last render saw it
 const wide = (t: string) => [...t.replace(/\*\*|`/g, '')].reduce((w, c) => w + (/[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/.test(c) ? 2 : 1), 0)
 const listOf = (head: string[], rows: string[][]) =>
   rows.map(r => [`- **${r[0] || '·'}**`, ...r.slice(1).map((c, i) => (c && c !== '-' ? `  - ${head[i + 1] || '·'}: ${c}` : '')).filter(Boolean)].join('\n')).join('\n')
+// the converted text of an answer, kept: every keystroke redraws the pane, and the conversion need not be redone for each
+const shownCache = new Map<string, string>()
+function shown(text: string, cols: number): string {
+  const k = `${cols}\u0000${text}`
+  let v = shownCache.get(k)
+  if (v === undefined) {
+    v = fitTables(texAll(text), cols)
+    if (shownCache.size > 200) shownCache.clear()
+    shownCache.set(k, v)
+  }
+  return v
+}
+
 // a pane opens at its top; once it has drawn, go to the end where the latest message and the input are
 const atBottom = ($: { ui: { scroll: (a: { in: string; to: "end" }) => unknown } }) => {
   for (const ms of [400, 1500]) setTimeout(() => { try { void Promise.resolve($.ui.scroll({ in: PANE, to: 'end' })).catch(() => {}) } catch {} }, ms)
@@ -135,6 +154,7 @@ const TEX: Record<string, string> = {
   times: '×', cdot: '·', div: '÷', pm: '±', leq: '≤', le: '≤', geq: '≥', ge: '≥', neq: '≠', ne: '≠', approx: '≈', rightarrow: '→', to: '→', leftarrow: '←', Rightarrow: '⇒', infty: '∞', sum: '∑', prod: '∏', in: '∈', ldots: '…', cdots: '…', sim: '∼',
   alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', theta: 'θ', lambda: 'λ', mu: 'μ', pi: 'π', sigma: 'σ', phi: 'φ', omega: 'ω', tau: 'τ', eta: 'η', Delta: 'Δ', Sigma: 'Σ',
 }
+const SUP: Record<string, string> = { '0': '⁰', '1': '¹', '2': '²', '3': '³', '4': '⁴', '5': '⁵', '6': '⁶', '7': '⁷', '8': '⁸', '9': '⁹', '+': '⁺', '-': '⁻' }
 function tex(m: string): string {
   const wrap = (x: string) => (/^[\w.]+$/.test(x) ? x : `(${x})`)
   for (let prev = ''; prev !== m; ) {
@@ -145,8 +165,11 @@ function tex(m: string): string {
     .replace(/\\(left|right|big|Big)\b\s*/g, '')
     .replace(/\\([A-Za-z]+)/g, (all, w: string) => TEX[w] ?? w)
     .replace(/\\[,;:! ]/g, ' ')
-    .replace(/\^\{?(\d)\}?/g, (_, d: string) => SUP[+d]!)
-    .replace(/[_^]\{([^{}]*)\}/g, (all, a: string) => (all[0] === '_' ? `_${a}` : `^${a}`))
+    .replace(/\^(?:\{([^{}]*)\}|(\w))/g, (_, a: string | undefined, b: string | undefined) => {
+      const x = a ?? b ?? ''
+      return /^[0-9+-]+$/.test(x) ? [...x].map(c => SUP[c] ?? c).join('') : x.length > 1 ? `^(${x})` : `^${x}`
+    })
+    .replace(/_\{([^{}]*)\}/g, (_, a: string) => `_${a}`)
     .replace(/[{}]/g, '')
 }
 function texAll(text: string): string {
@@ -278,8 +301,8 @@ async function setting($: EngineInterface, cli: string, what: string, value: str
   const say = (t: string) => patch($, cli, c => ({ ...c, error: '', turns: [...c.turns, { who: 'user', text: `/${what}${value ? ` ${value}` : ''}` }, { who: 'ai', text: t }] }))
   const models = await modelsOf($, cli)
   const chat = (await read($, state)).chats[cli] ?? blank
-  const names = what === 'model' ? models.map(m => (m.label === m.id ? m.id : `${m.label} (${m.id})`)) : effortsFor(cli, models, chat.model)
-  if (!value) return say(`${what}: ${chat[what as 'model' | 'effort'] || 'default'}\navailable: ${names.join(', ') || '(unknown)'}\n/${what} <name> sets it, /${what} default clears it`)
+  const names = what === 'model' ? models.map(m => (m.label === m.id ? m.id : `${m.label} (${m.id})`)) : effortsFor(cli, models, chat.model || models[0]?.id || '')
+  if (!value) return say(`${what}: ${chat[what as 'model' | 'effort'] || (what === 'model' ? models[0]?.id : '') || 'default'}\navailable: ${names.join(', ') || '(unknown)'}\n/${what} <name> sets it, /${what} default clears it`)
   let v = value === 'default' ? '' : value
   if (what === 'model') v = models.find(m => m.id === value || m.label.toLowerCase() === value.toLowerCase())?.id ?? v // a name or an id
   else if (v && !names.includes(v)) return say(`${cli} has no effort "${v}". available: ${names.join(', ')}`)
@@ -288,23 +311,51 @@ async function setting($: EngineInterface, cli: string, what: string, value: str
   return say(`${what} for ${cli}: ${v || 'default'}`)
 }
 
+type Ctx = { records: number; path?: string; diffs?: string; chars?: number; notes?: string; snap?: string; errors?: string[] }
+async function context($: EngineInterface, cli: string, chat: Chat): Promise<Ctx> {
+  const r = await $.process.run(['python3', `${$.plugin.root}/hooks/context.py`, await $.session.id(), String(chat.seen), cli, chat.snap ?? ''], { timeoutMs: 60_000 })
+  if (r.exitCode !== 0) throw new Error(r.stderr.trim().split('\n').slice(-3).join('\n') || `exited ${r.exitCode}`)
+  const c = JSON.parse(r.stdout) as Ctx
+  if (typeof c.records !== 'number') throw new Error('unexpected answer from the reader')
+  if (c.errors?.length) throw new Error(c.errors.join('; '))
+  return c
+}
+
 async function send($: EngineInterface, text: string) {
   const s = await read($, state)
   const cli = s.active
   const chat = s.chats[cli] ?? blank
   if (!cli || !text.trim() || chat.running) return
-  await patch($, cli, c => ({ ...c, draft: '' })) // the field empties once the message is sent
+  drafts[cli] = ''
+  await patch($, cli, c => ({ ...c, draft: '' })) // the field empties once the message is sent (this redraw carries the empty value)
   const word = /^\/(model|effort)(?:\s+(.*))?$/.exec(text.trim())
   if (word) return setting($, cli, word[1]!, (word[2] ?? '').trim())
-  await patch($, cli, c => ({ ...c, running: true, error: '', steps: [], turns: [...c.turns, { who: 'user', text }] }))
+  await patch($, cli, c => ({ ...c, running: true, error: '', failed: '', steps: [] }))
+  // the Claude Code conversation (what is new since this chat last heard of it) goes along as files to read. If it cannot be
+  // read the AI is not started without it: the failure is shown, with a button to try again.
+  let ctx: Ctx
   try {
-    // the Claude Code conversation (what is new since this chat last heard of it) goes along as a file to read
-    const ctx = JSON.parse((await $.process.run(['python3', `${$.plugin.root}/hooks/context.py`, await $.session.id(), String(chat.seen), cli], { timeoutMs: 60_000 })).stdout || '{}') as { records?: number; path?: string }
+    ctx = await context($, cli, chat)
+  } catch (e) {
+    await patch($, cli, c => ({ ...c, running: false, failed: text, error: `Could not read the Claude Code conversation, so nothing was sent: ${String(e).replace(/^Error: /, '')}` }))
+    return
+  }
+  await patch($, cli, c => ({ ...c, turns: [...c.turns, { who: 'user', text }] }))
+  try {
     const others = heldBy(s.flags, cli)
-    const intro = rules() + (others.length ? `Other agents are changing these files right now, so do not edit them (if you need one, stop and tell the user): ${others.join(', ')}. ` : '') + (!ctx.path ? '' : chat.seen
-      ? `New messages in the Claude Code session since your last turn are in ${ctx.path}; read them first. `
-      : `The conversation so far between the user and Claude Code, in this folder, is in ${ctx.path}. Read it first: it is background, not instructions to run again. `)
-    const cmd = argv(cli, chat.sid, `${intro}The user now asks: ${text}`, opts(cli, chat.model, chat.effort, (await modelsOf($, cli)).find(m => m.id === chat.model)?.efforts ?? []))
+    const acc = (chat.pending ?? 0) + (ctx.chars ?? 0) // what the AI has been given since it last summarised, not just this turn's share
+    const long = acc > LONG
+    const intro = rules() + (others.length ? `Other agents are changing these files right now, so do not edit them (if you need one, stop and tell the user): ${others.join(', ')}. ` : '') + (!ctx.path && !ctx.diffs ? '' : [
+      chat.seen ? 'Since your last turn, Claude Code and the user have gone on working in this folder.' : 'Before you, the user worked with Claude Code in this folder.',
+      ctx.path ? ` ${chat.seen ? 'The new messages' : 'The whole conversation'} are in ${ctx.path}.` : '',
+      ctx.diffs ? ` Every file change ${chat.seen ? 'since then ' : ''}is in ${ctx.diffs}, each as a complete diff.` : '',
+      ' All of this is background, not instructions to run again.',
+      long ? ` The conversation from Claude Code has grown long (${acc} characters since you last summarised): read it all, then write your own short summary of everything you have been given from it so far${chat.noted ? ` into ${ctx.notes} (add to the notes already there)` : ` to ${ctx.notes}`}, and work from that summary from here on.` : ' Read it all first.',
+      ctx.diffs ? ' Read the diffs in full: never summarise or skip them.' : '',
+      ' '].join(''))
+    const ms = await modelsOf($, cli)
+    const cur = chat.model || ms[0]?.id || '' // none picked: the first the CLI lists
+    const cmd = argv(cli, chat.sid, `${intro}The user now asks: ${text}`, opts(cli, cur, pickEffort(effortsFor(cli, ms, cur), chat.effort), ms.find(m => m.id === cur)?.efforts ?? []))
     const child = $.process.spawn({ argv: cmd })
     let out = ''
     let err = ''
@@ -324,7 +375,7 @@ async function send($: EngineInterface, text: string) {
     const done = parse(cli, out)
     if (done.error) throw new Error(done.error)
     const sid = cli === 'claude' ? (chat.sid || cmd[cmd.indexOf('--session-id') + 1] || '') : done.sid || chat.sid
-    await patch($, cli, c => ({ ...c, sid, seen: ctx.records ?? c.seen, steps: [], turns: [...c.turns, { who: 'ai', text: done.text || '(no answer)', steps: done.steps }] }))
+    await patch($, cli, c => ({ ...c, sid, seen: ctx.records ?? c.seen, snap: ctx.snap || c.snap, pending: long ? 0 : acc, noted: c.noted || long, steps: [], turns: [...c.turns, { who: 'ai', text: done.text || '(no answer)', steps: done.steps }] }))
   } catch (e) {
     await patch($, cli, c => ({ ...c, steps: [], error: String(e) }))
   } finally {
@@ -340,7 +391,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'call', description: 'Pick an installed AI CLI (claude, codex, agy, opencode) and talk to it in a side pane (/call <name> opens it directly)' })
     // it was open when the last session ended: open again, with this session's chats
-    if (await $.store.get('open')) {
+    if (await $.store.get(`open:${await $.session.id()}`)) {
       const kept = (await $.store.get(`chats:${await $.session.id()}`)) as { active: string; chats: Record<string, Chat> } | undefined
       if (kept) await update($, state, s => ({ ...s, active: kept.active, chats: kept.chats }))
       await find($)
@@ -353,7 +404,7 @@ export const register: Register = on => {
 
   // closed by hand (or by a plugin): not open again next time; an unload at exit does not count
   on('ui.close', async ($, e, next) => {
-    if (e.id === PANE && e.origin.kind !== 'unload') await $.store.set('open', false)
+    if (e.id === PANE && e.origin.kind !== 'unload') await $.store.set(`open:${await $.session.id()}`, false)
     return next(e)
   })
 
@@ -382,7 +433,7 @@ export const register: Register = on => {
     await patch($, (await read($, state)).active, c => ({ ...c, unread: false }))
     await $.ui.open({ id: PANE, title: 'Call' })
     atBottom($)
-    await $.store.set('open', true)
+    await $.store.set(`open:${await $.session.id()}`, true)
     void modelsOf($, (await read($, state)).active) // for the model list
     return { text: `Call pane open. Installed: ${found.join(', ')}.` }
   })
@@ -395,16 +446,17 @@ export const register: Register = on => {
     const cli = s.active
     const chat = s.chats[cli] ?? blank
     const turns = chat.turns.slice(-SHOWN)
-    const mark = (c: string) => (s.chats[c]?.running ? ' ⟳' : '')
     return (
       <Box flexDirection="column" minHeight={e.props.scroll?.bodyRows}>
         <Box flexDirection="row" columnGap={1}>
           {s.found.map(c => {
-            const new_ = c !== cli && s.chats[c]?.unread // an answer came in while another tab was shown: yellow
-            const label = `${c === cli ? `[${c}]` : c}${mark(c)}`
+            const busy = s.chats[c]?.running // at work: blue
+            const new_ = !busy && c !== cli && s.chats[c]?.unread // an answer came in while another tab was shown: yellow
+            const bg = busy ? '#1f4e8c' : '#e5c07b'
+            const label = `${c === cli ? `[${c}]` : c}`
             return (
-              <Button key={`tab-${c}`} label={new_ ? undefined : label} plain dimColor={c !== cli && !new_} onPress={() => { void modelsOf($, c); return update($, state, v => ({ ...v, active: c, hint: false, menu: false, chats: { ...v.chats, [c]: { ...(v.chats[c] ?? blank), unread: false } } })) }}>
-                {new_ ? <Text backgroundColor="yellow" color="black">{label}</Text> : undefined}
+              <Button key={`tab-${c}`} label={new_ || busy ? undefined : label} plain dimColor={c !== cli && !new_ && !busy} onPress={() => { void modelsOf($, c); return update($, state, v => ({ ...v, active: c, hint: false, menu: false, chats: { ...v.chats, [c]: { ...(v.chats[c] ?? blank), unread: false } } })) }}>
+                {new_ || busy ? <Text backgroundColor={bg} color={busy ? 'white' : 'black'}>{label}</Text> : undefined}
               </Button>
             )
           })}
@@ -423,14 +475,14 @@ export const register: Register = on => {
           return (
             <Box flexDirection="row" marginTop={1} backgroundColor={t.who === 'user' ? '#3a3a3a' : undefined}>
               <Box width={4} flexShrink={0}>
-                <Text bold color={t.who === 'user' ? 'cyan' : 'green'}>{t.who === 'user' ? 'You' : cli[0]!.toUpperCase()}</Text>
+                <Text bold color={t.who === 'user' ? 'cyan' : 'green'}>{t.who === 'user' ? 'You' : <Text backgroundColor='#e5c07b'>{'  '}</Text>}</Text>
               </Box>
               <Box flexDirection="column" flexGrow={1} flexShrink={1}>
                 {t.steps?.length ? (
                   <Button key={`steps-${at}`} label={`${t.open ? '▾' : '▸'} ${t.steps.length} step${t.steps.length > 1 ? 's' : ''}`} plain dimColor onPress={() => patch($, cli, c => ({ ...c, turns: c.turns.map((x, i) => (i === at ? { ...x, open: !x.open } : x)) }))} />
                 ) : null}
                 {t.open && t.steps?.map(x => <Text dimColor>{`  ${x}`}</Text>)}
-                {t.who === 'ai' ? <Markdown text={fitTables(texAll(t.text), columns - 6)} /> : <Text>{t.text}</Text>}
+                {t.who === 'ai' ? <Markdown text={shown(t.text, columns - 6)} /> : <Text>{t.text}</Text>}
               </Box>
             </Box>
           )
@@ -438,7 +490,7 @@ export const register: Register = on => {
         {chat.running && (
           <Box flexDirection="row" marginTop={1}>
             <Box width={4} flexShrink={0}>
-              <Text bold color="green">{cli[0]!.toUpperCase()}</Text>
+              <Text backgroundColor='#1f4e8c'>{'  '}</Text>
             </Box>
             <Box flexDirection="column" flexGrow={1} flexShrink={1}>
               {chat.steps.slice(-10).map(x => <Text dimColor>{`  ${x}`}</Text>)}
@@ -447,23 +499,25 @@ export const register: Register = on => {
           </Box>
         )}
         {chat.error ? <Text color="red">{chat.error}</Text> : null}
+        {chat.failed ? <Button key="retry" label="↻ retry" onPress={() => { const t = chat.failed; void patch($, cli, c => ({ ...c, failed: '', error: '' })).then(() => send($, t)) }} /> : null}
         <Box flexGrow={1} />{/* a short chat leaves the room here, so the controls and the input stay at the bottom */}
         {cli && (() => {
           const models = s.models[cli] ?? []
-          const levels = effortsFor(cli, models, chat.model)
-          const lv = Math.max(0, levels.indexOf(chat.effort || 'medium')) // none chosen yet: shown on medium (the CLI's own default is used until one is picked)
+          const cur = chat.model || models[0]?.id || ''
+          const levels = effortsFor(cli, models, cur)
+          const lv = Math.max(0, levels.indexOf(pickEffort(levels, chat.effort)))
           const color = ramp(RED, levels.length > 1 ? lv / (levels.length - 1) : 0)
           const step = (d: number) => patch($, cli, c => ({ ...c, effort: levels[Math.max(0, Math.min(levels.length - 1, lv + d))] ?? c.effort })).then(() => keep($))
           return (
             <Box flexDirection="column">
               {s.menu ? (
                 <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-                  {[{ id: '', label: 'default' }, ...models].map(m => (
+                  {models.map(m => (
                     <Button
                       key={`m:${m.id}`}
-                      label={`${m.id === chat.model ? '●' : '○'} ${m.label}`}
+                      label={`${m.id === cur ? '●' : '○'} ${m.label}`}
                       plain
-                      dimColor={m.id !== chat.model}
+                      dimColor={m.id !== cur}
                       onPress={() => update($, state, v => ({ ...v, menu: false })).then(() => patch($, cli, c => ({ ...c, model: m.id, effort: effortsFor(cli, models, m.id).includes(c.effort) ? c.effort : '' }))).then(() => keep($))}
                     />
                   ))}
@@ -471,7 +525,7 @@ export const register: Register = on => {
               ) : (
               <Box flexDirection="row" columnGap={1}>
                 <Box flexGrow={1} />
-                <Button key="model" label={`${models.find(m => m.id === chat.model)?.label ?? (chat.model || 'default')} ▴`} plain onPress={() => update($, state, v => ({ ...v, menu: !v.menu }))} />
+                <Button key="model" label={`${models.find(m => m.id === cur)?.label ?? (cur || '…')} ▴`} plain onPress={() => update($, state, v => ({ ...v, menu: !v.menu }))} />
                 <Button key="effort-prev" label="◀" plain dimColor={lv <= 0} onPress={() => step(-1)} />
                 <Box width={7} flexShrink={0} justifyContent="center">
                   <Text bold color={color}>{levels[lv] ?? ''}</Text>
@@ -486,7 +540,7 @@ export const register: Register = on => {
         <Box flexDirection="row" backgroundColor="#3a3a3a">
           {cli && 'Input' in ui && (
             <Box flexGrow={1} flexShrink={1}>
-              <ui.Input key="ask" autoFocus rows={2} value={chat.draft} onInput={(v: string) => patch($, cli, c => ({ ...c, draft: v }))} placeholder={chat.running ? `${cli} is answering…` : `Send to ${cli} (Enter)`} submitLabel="send" onSubmit={(text: string) => { void send($, text) }} />
+              <ui.Input key="ask" autoFocus rows={2} value={drafts[cli] ?? ''} onInput={(v: string) => { drafts[cli] = v }} placeholder={chat.running ? `${cli} is answering…` : `Send to ${cli} (Enter)`} submitLabel="" onSubmit={(text: string) => { void send($, text) }} />
             </Box>
           )}
           <Button key="to-start" label="▲" plain dimColor onPress={() => $.ui.scroll({ in: PANE, to: 'start' })} />
