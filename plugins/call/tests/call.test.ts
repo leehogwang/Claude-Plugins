@@ -92,7 +92,7 @@ test('the work on the way is shown, then folded into one line that unfolds', asy
   await $.command.run({ command: 'call', args: 'codex' } as never)
   const ui = await mount($)
   await ui.input({ key: 'ask', text: 'go' })
-  expect(await ui.find({ type: 'Button', label: /▸ 작업 3단계/ } as never)).toBeDefined() // the remark and the command
+  expect(await ui.find({ type: 'Button', label: /▸ 3 steps/ } as never)).toBeDefined() // the remark and the command
   expect(await ui.find({ type: 'Text', text: /\$ ls \| head -3/ })).toBeUndefined() // folded: the list is hidden
   await ui.press({ key: 'steps-1' })
   expect(await ui.find({ type: 'Text', text: /\$ ls \| head -3/ })).toBeDefined()
@@ -126,7 +126,7 @@ test('one CLI keeps working while another is asked; the one that finished unseen
   expect(await dump(ui, { type: 'Button', key: 'tab-agy' })).not.toContain('yellow')
 })
 
-test('model, effort: typed in the pane, picked from the list, dragged on the slider', async ($, on) => {
+test('model, effort: typed in the pane, picked from the list, stepped with the arrows', async ($, on) => {
   const { spawned } = world(on)
   await $.command.run({ command: 'call', args: 'codex' } as never)
   const ui = await mount($)
@@ -141,15 +141,16 @@ test('model, effort: typed in the pane, picked from the list, dragged on the sli
   await tick()
   await ui.press({ key: 'model' })
   await ui.press({ key: 'm:gemini-3.8-flash' }) // the three effort rows fold into one model
-  await ui.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'slider-effort' }) // default low medium high: x=1 is low
+  await ui.press({ key: 'effort-prev' }) // unset shows as medium; one step back is low
   await ui.input({ key: 'ask', text: 'e' })
   const last = spawned.at(-1)!
   expect(last).not.toContain('--effort') // agy joins model and effort in its one id
   expect(last[last.indexOf('--model') + 1]).toBe('gemini-3.8-flash-low')
 
-  await ui.pointer({ type: 'move', x: 3, y: 0, button: 'left', in: 'slider-effort' }) // dragging
+  await ui.press({ key: 'effort-next' })
+  await ui.press({ key: 'effort-next' })
   expect(await ui.find({ type: 'Text', text: /^high$/ })).toBeDefined()
-  await ui.pointer({ type: 'move', x: 0, y: 0, in: 'slider-effort' }) // no button down: only hovering
+  await ui.press({ key: 'effort-next' }) // already at the top: stays
   expect(await ui.find({ type: 'Text', text: /^high$/ })).toBeDefined()
   await ui.press({ key: 'model' })
   await ui.press({ key: 'm:gpt-oss-120b' }) // only medium exists for it: the chosen high is dropped

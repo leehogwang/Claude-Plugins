@@ -85,16 +85,14 @@ function resumeCmd(cli: string, sid: string) {
   return { claude: `claude --resume ${sid}`, codex: `codex resume ${sid}`, opencode: `opencode -s ${sid}`, agy: `agy --conversation ${sid}` }[cli] ?? ''
 }
 
-// effort runs from cool to hot, models along a violet-pink ramp; "default" is grey
-const HOT = ['#50fa7b', '#f1fa8c', '#ffb86c', '#ff5555']
-const COOL = ['#8be9fd', '#bd93f9', '#ff79c6']
+// effort runs from light red to a deeper (not dark) red
+const RED = ['#ffb4b4', '#ff6e6e', '#e5484d']
 function ramp(stops: string[], t: number) {
   const p = Math.max(0, Math.min(1, t)) * (stops.length - 1)
   const i = Math.min(stops.length - 2, Math.floor(p))
   const [a, b] = [stops[i]!, stops[i + 1]!].map(h => [1, 3, 5].map(k => parseInt(h.slice(k, k + 2), 16)))
   return '#' + a!.map((v, k) => Math.round(v + (b![k]! - v) * (p - i)).toString(16).padStart(2, '0')).join('')
 }
-const colorAt = (stops: string[], at: number, n: number) => (at <= 0 ? 'gray' : ramp(stops, n <= 2 ? 0 : (at - 1) / (n - 2)))
 
 const json = (line: string): any => { try { return JSON.parse(line) } catch { return undefined } }
 
@@ -127,6 +125,38 @@ let columns = 60 // the pane's width, as the last render saw it
 const wide = (t: string) => [...t.replace(/\*\*|`/g, '')].reduce((w, c) => w + (/[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/.test(c) ? 2 : 1), 0)
 const listOf = (head: string[], rows: string[][]) =>
   rows.map(r => [`- **${r[0] || '·'}**`, ...r.slice(1).map((c, i) => (c && c !== '-' ? `  - ${head[i + 1] || '·'}: ${c}` : '')).filter(Boolean)].join('\n')).join('\n')
+// a pane opens at its top; once it has drawn, go to the end where the latest message and the input are
+const atBottom = ($: { ui: { scroll: (a: { in: string; to: "end" }) => unknown } }) => {
+  for (const ms of [400, 1500]) setTimeout(() => { try { void Promise.resolve($.ui.scroll({ in: PANE, to: 'end' })).catch(() => {}) } catch {} }, ms)
+}
+
+// Math in an answer ($...$ and $$...$$ LaTeX) can't be drawn in a terminal: it becomes plain Unicode (\frac{1}{3} -> 1/3, \times -> ×).
+const TEX: Record<string, string> = {
+  times: '×', cdot: '·', div: '÷', pm: '±', leq: '≤', le: '≤', geq: '≥', ge: '≥', neq: '≠', ne: '≠', approx: '≈', rightarrow: '→', to: '→', leftarrow: '←', Rightarrow: '⇒', infty: '∞', sum: '∑', prod: '∏', in: '∈', ldots: '…', cdots: '…', sim: '∼',
+  alpha: 'α', beta: 'β', gamma: 'γ', delta: 'δ', epsilon: 'ε', theta: 'θ', lambda: 'λ', mu: 'μ', pi: 'π', sigma: 'σ', phi: 'φ', omega: 'ω', tau: 'τ', eta: 'η', Delta: 'Δ', Sigma: 'Σ',
+}
+function tex(m: string): string {
+  const wrap = (x: string) => (/^[\w.]+$/.test(x) ? x : `(${x})`)
+  for (let prev = ''; prev !== m; ) {
+    prev = m
+    m = m.replace(/\\d?frac\s*\{([^{}]*)\}\s*\{([^{}]*)\}/g, (_, a, b) => `${wrap(a)}/${wrap(b)}`).replace(/\\sqrt\s*\{([^{}]*)\}/g, (_, a) => `√${wrap(a)}`).replace(/\\(?:mathbf|mathrm|mathit|text|textbf|operatorname|boldsymbol|mathcal)\s*\{([^{}]*)\}/g, '$1')
+  }
+  return m
+    .replace(/\\(left|right|big|Big)\b\s*/g, '')
+    .replace(/\\([A-Za-z]+)/g, (all, w: string) => TEX[w] ?? w)
+    .replace(/\\[,;:! ]/g, ' ')
+    .replace(/\^\{?(\d)\}?/g, (_, d: string) => SUP[+d]!)
+    .replace(/[_^]\{([^{}]*)\}/g, (all, a: string) => (all[0] === '_' ? `_${a}` : `^${a}`))
+    .replace(/[{}]/g, '')
+}
+function texAll(text: string): string {
+  // leave code alone: split on fences and inline code, convert only the rest
+  return text.split(/(```[\s\S]*?```|`[^`\n]*`)/).map((part, i) => i % 2 ? part : part
+    .replace(/\$\$([\s\S]+?)\$\$/g, (_, m) => tex(m))
+    .replace(/\$(?!\s)([^$\n]*?[\\_^{=<>][^$\n]*?)(?<!\s)\$/g, (_, m) => tex(m))
+    .replace(/\*\*([^*\n]*?[^\p{L}\p{N}*\s])\*\*(?=[\p{L}\p{N}])/gu, '**$1** ')).join('')
+}
+
 function fitTables(text: string, cols: number): string {
   const lines = text.split('\n')
   const out: string[] = []
@@ -315,6 +345,7 @@ export const register: Register = on => {
       if (kept) await update($, state, s => ({ ...s, active: kept.active, chats: kept.chats }))
       await find($)
       await $.ui.open({ id: PANE, title: 'Call' })
+    atBottom($)
       void modelsOf($, (await read($, state)).active)
     }
     return next(e)
@@ -350,36 +381,23 @@ export const register: Register = on => {
     if (want) await update($, state, s => ({ ...s, active: want }))
     await patch($, (await read($, state)).active, c => ({ ...c, unread: false }))
     await $.ui.open({ id: PANE, title: 'Call' })
+    atBottom($)
     await $.store.set('open', true)
-    void modelsOf($, (await read($, state)).active) // for the model slider
+    void modelsOf($, (await read($, state)).active) // for the model list
     return { text: `Call pane open. Installed: ${found.join(', ')}.` }
-  })
-
-  // the effort slider: {set: index} from a click or drag on its track
-  on('ui.message', async ($, e, next) => {
-    if (e.requestId !== PANE || e.element !== 'slider-effort') return next(e)
-    const set = (e.data as { set?: unknown } | null)?.set
-    if (typeof set === 'number') {
-      const s = await read($, state)
-      const levels = ['', ...effortsFor(s.active, s.models[s.active] ?? [], s.chats[s.active]?.model ?? '')]
-      const v = levels[Math.max(0, Math.min(levels.length - 1, Math.round(set)))] ?? ''
-      await patch($, s.active, c => ({ ...c, effort: v }))
-      await keep($)
-    }
-    return {}
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
     columns = e.props.bodyColumns
-    const { Box, Button, Client, Markdown, Text } = ui
+    const { Box, Button, Markdown, Text } = ui
     const s = await read($, state)
     const cli = s.active
     const chat = s.chats[cli] ?? blank
     const turns = chat.turns.slice(-SHOWN)
     const mark = (c: string) => (s.chats[c]?.running ? ' ⟳' : '')
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" minHeight={e.props.scroll?.bodyRows}>
         <Box flexDirection="row" columnGap={1}>
           {s.found.map(c => {
             const new_ = c !== cli && s.chats[c]?.unread // an answer came in while another tab was shown: yellow
@@ -390,68 +408,29 @@ export const register: Register = on => {
               </Button>
             )
           })}
-          {chat.sid && <Button key="terminal" label="터미널에서 열기" plain dimColor onPress={() => update($, state, v => ({ ...v, hint: !v.hint }))} />}
-          <Button key="to-end" label="⤓ 맨 아래" plain dimColor onPress={() => $.ui.scroll({ in: PANE, to: 'end' })} />
+          {chat.sid && <Button key="terminal" label="Open in terminal" plain dimColor onPress={() => update($, state, v => ({ ...v, hint: !v.hint }))} />}
+          <Box flexGrow={1} />
+          <Button key="to-end" label="▼" plain dimColor onPress={() => $.ui.scroll({ in: PANE, to: 'end' })} />
         </Box>
-        {cli && (() => {
-          const models = s.models[cli] ?? []
-          const at = Math.max(0, models.findIndex(m => m.id === chat.model) + 1)
-          const levels = ['', ...effortsFor(cli, models, chat.model)]
-          const lv = Math.max(0, levels.indexOf(chat.effort))
-          const color = colorAt(HOT, lv, levels.length)
-          const len = Math.min(levels.length, 20)
-          return (
-            <Box flexDirection="column">
-              <Box flexDirection="row">
-                <Box width={8} flexShrink={0}>
-                  <Text dimColor>model</Text>
-                </Box>
-                <Text color={colorAt(COOL, at, models.length + 1)}>● </Text>
-                <Button key="model" label={`${models.find(m => m.id === chat.model)?.label ?? (chat.model || 'default')} ${s.menu ? '▴' : '▾'}`} plain onPress={() => update($, state, v => ({ ...v, menu: !v.menu }))} />
-              </Box>
-              <Box flexDirection="row">
-                <Box width={8} flexShrink={0}>
-                  <Text dimColor>effort</Text>
-                </Box>
-                <Client key="slider-effort" module="./slider.tsx" props={{ levels: levels.length, at: lv, len, color }} width={len} height={1} />
-                <Text dimColor>: </Text>
-                <Text bold color={color}>{levels[lv] || 'default'}</Text>
-              </Box>
-              {s.menu && (
-                <Box flexDirection="column" marginLeft={8}>
-                  {[{ id: '', label: 'default' }, ...models].map(m => (
-                    <Button
-                      key={`m:${m.id}`}
-                      label={`${m.id === chat.model ? '●' : '○'} ${m.label}`}
-                      plain
-                      dimColor={m.id !== chat.model}
-                      onPress={() => update($, state, v => ({ ...v, menu: false })).then(() => patch($, cli, c => ({ ...c, model: m.id, effort: effortsFor(cli, models, m.id).includes(c.effort) ? c.effort : '' }))).then(() => keep($))}
-                    />
-                  ))}
-                </Box>
-              )}
-            </Box>
-          )
-        })()}
         {Object.entries(s.flags).slice(0, 8).map(([p, who]) => (
-          <Text color={who.length > 1 ? 'red' : 'yellow'}>{who.length > 1 ? `⚠ ${short(p)}  ${who.join(' + ')}가 동시에 수정 중` : `✎ ${short(p)}  ${who[0]}`}</Text>
+          <Text color={who.length > 1 ? 'red' : 'yellow'}>{who.length > 1 ? `⚠ ${short(p)}  ${who.join(' + ')} are changing it at once` : `✎ ${short(p)}  ${who[0]}`}</Text>
         ))}
         {s.hint && chat.sid ? <Text color="yellow">{resumeCmd(cli, chat.sid)}</Text> : null}
-        {!cli && <Text dimColor>/call 로 설치된 AI를 찾습니다.</Text>}
+        {!cli && <Text dimColor>Run /call to find the installed AIs.</Text>}
         {chat.turns.length > SHOWN && <Text dimColor>{`… ${chat.turns.length - SHOWN} earlier messages`}</Text>}
         {turns.map((t, k) => {
           const at = chat.turns.length - turns.length + k
           return (
-            <Box flexDirection="row" marginTop={1}>
+            <Box flexDirection="row" marginTop={1} backgroundColor={t.who === 'user' ? '#3a3a3a' : undefined}>
               <Box width={4} flexShrink={0}>
-                <Text bold color={t.who === 'user' ? 'cyan' : 'green'}>{t.who === 'user' ? '나' : cli[0]!.toUpperCase()}</Text>
+                <Text bold color={t.who === 'user' ? 'cyan' : 'green'}>{t.who === 'user' ? 'You' : cli[0]!.toUpperCase()}</Text>
               </Box>
               <Box flexDirection="column" flexGrow={1} flexShrink={1}>
                 {t.steps?.length ? (
-                  <Button key={`steps-${at}`} label={`${t.open ? '▾' : '▸'} 작업 ${t.steps.length}단계`} plain dimColor onPress={() => patch($, cli, c => ({ ...c, turns: c.turns.map((x, i) => (i === at ? { ...x, open: !x.open } : x)) }))} />
+                  <Button key={`steps-${at}`} label={`${t.open ? '▾' : '▸'} ${t.steps.length} step${t.steps.length > 1 ? 's' : ''}`} plain dimColor onPress={() => patch($, cli, c => ({ ...c, turns: c.turns.map((x, i) => (i === at ? { ...x, open: !x.open } : x)) }))} />
                 ) : null}
                 {t.open && t.steps?.map(x => <Text dimColor>{`  ${x}`}</Text>)}
-                {t.who === 'ai' ? <Markdown text={fitTables(t.text, columns - 6)} /> : <Text>{t.text}</Text>}
+                {t.who === 'ai' ? <Markdown text={fitTables(texAll(t.text), columns - 6)} /> : <Text>{t.text}</Text>}
               </Box>
             </Box>
           )
@@ -463,17 +442,55 @@ export const register: Register = on => {
             </Box>
             <Box flexDirection="column" flexGrow={1} flexShrink={1}>
               {chat.steps.slice(-10).map(x => <Text dimColor>{`  ${x}`}</Text>)}
-              <Text dimColor>{`⟳ ${cli} 작업 중…`}</Text>
+              <Text dimColor>{`⟳ ${cli} is working…`}</Text>
             </Box>
           </Box>
         )}
         {chat.error ? <Text color="red">{chat.error}</Text> : null}
-        {cli && 'Input' in ui && (
-          <Box marginTop={1}>
-            <ui.Input key="ask" value={chat.draft} onInput={(v: string) => patch($, cli, c => ({ ...c, draft: v }))} placeholder={chat.running ? `${cli}가 답하는 중…` : `${cli}에게 보내기 (Enter)`} submitLabel="보내기" onSubmit={(text: string) => { void send($, text) }} />
-          </Box>
-        )}
-        <Button key="to-start" label="⤒ 맨 위" plain dimColor onPress={() => $.ui.scroll({ in: PANE, to: 'start' })} />
+        <Box flexGrow={1} />{/* a short chat leaves the room here, so the controls and the input stay at the bottom */}
+        {cli && (() => {
+          const models = s.models[cli] ?? []
+          const levels = effortsFor(cli, models, chat.model)
+          const lv = Math.max(0, levels.indexOf(chat.effort || 'medium')) // none chosen yet: shown on medium (the CLI's own default is used until one is picked)
+          const color = ramp(RED, levels.length > 1 ? lv / (levels.length - 1) : 0)
+          const step = (d: number) => patch($, cli, c => ({ ...c, effort: levels[Math.max(0, Math.min(levels.length - 1, lv + d))] ?? c.effort })).then(() => keep($))
+          return (
+            <Box flexDirection="column">
+              {s.menu ? (
+                <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+                  {[{ id: '', label: 'default' }, ...models].map(m => (
+                    <Button
+                      key={`m:${m.id}`}
+                      label={`${m.id === chat.model ? '●' : '○'} ${m.label}`}
+                      plain
+                      dimColor={m.id !== chat.model}
+                      onPress={() => update($, state, v => ({ ...v, menu: false })).then(() => patch($, cli, c => ({ ...c, model: m.id, effort: effortsFor(cli, models, m.id).includes(c.effort) ? c.effort : '' }))).then(() => keep($))}
+                    />
+                  ))}
+                </Box>
+              ) : (
+              <Box flexDirection="row" columnGap={1}>
+                <Box flexGrow={1} />
+                <Button key="model" label={`${models.find(m => m.id === chat.model)?.label ?? (chat.model || 'default')} ▴`} plain onPress={() => update($, state, v => ({ ...v, menu: !v.menu }))} />
+                <Button key="effort-prev" label="◀" plain dimColor={lv <= 0} onPress={() => step(-1)} />
+                <Box width={7} flexShrink={0} justifyContent="center">
+                  <Text bold color={color}>{levels[lv] ?? ''}</Text>
+                </Box>
+                <Button key="effort-next" label="▶" plain dimColor={lv >= levels.length - 1} onPress={() => step(1)} />
+                <Button key="clear" label="clear" plain dimColor onPress={() => patch($, cli, c => ({ ...blank, model: c.model, effort: c.effort })).then(() => keep($))} />
+              </Box>
+              )}
+            </Box>
+          )
+        })()}
+        <Box flexDirection="row" backgroundColor="#3a3a3a">
+          {cli && 'Input' in ui && (
+            <Box flexGrow={1} flexShrink={1}>
+              <ui.Input key="ask" autoFocus rows={2} value={chat.draft} onInput={(v: string) => patch($, cli, c => ({ ...c, draft: v }))} placeholder={chat.running ? `${cli} is answering…` : `Send to ${cli} (Enter)`} submitLabel="send" onSubmit={(text: string) => { void send($, text) }} />
+            </Box>
+          )}
+          <Button key="to-start" label="▲" plain dimColor onPress={() => $.ui.scroll({ in: PANE, to: 'start' })} />
+        </Box>
       </Box>
     )
   })
