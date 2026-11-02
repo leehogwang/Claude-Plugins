@@ -68,7 +68,7 @@ Example of the shape (Korean conversation):
 
 Do not drop anything from the current summary that is still true; correct what the new part changed.
 Mark the few key terms of each line (names, commands, paths, numbers) with **bold** or \`code\`.
-Highlight with ==double equals== the one or two spots in the whole summary the person must not miss: a decision that changes how they work, the answer to a question they asked ("does X run by itself?"), a step still needed before something works (a restart), a risk or something broken. Use it sparingly (at most about one per entry, and never on a whole line), only on text that carries that weight, and never inside \`code\` or **bold**.
+Highlight with ==double equals== a SHORT phrase (3 to 12 words, never a whole line or sentence, never a command or path) in each entry that has something the person must not miss: a decision that changes how they work, the answer to a question they asked ("does X run by itself?"), a step still needed before something works (a restart), a risk or something broken. Aim for 3 to 6 highlights in the whole summary, drop a highlight once its point is settled, and never put one inside \`code\` or **bold**. Example: 남은 일: - agy-bridge ==아직 제거 안 됨==, 아래 명령을 직접 실행
 Use only what the transcript shows; do not invent.`
 
 // The summary so far, brought up to date: only the part of the conversation since it was made goes to
@@ -78,7 +78,7 @@ async function summarize($: EngineInterface) {
   await update($, error, () => '')
   try {
     const id = await $.session.id()
-    const key = `summary:v8:${id}`
+    const key = `summary:v9:${id}`
     const kept = (await $.store.get(key)) as Summary | undefined
     const r = await $.process.run(['python3', `${$.plugin.root}/hooks/extract.py`, id, String(kept?.records ?? 0)], { timeoutMs: 60_000 })
     if (r.exitCode !== 0) {
