@@ -35,6 +35,12 @@ Try one without installing: `claude --plugin-dir ~/Claude-Plugins/plugins/summar
 - `replay-theater`: records edits quietly during each turn (it never blocks or changes them); the replay opens on `/replay` or the hint above the prompt.
 - `filetree`: closed at session start (`install.sh` sets "Open at start" to off); the pane opens only with `/filetree`.
 
+## Panes come back
+
+`summary`, `see-parent` and `call` remember that their pane was open. Leave the session and enter it again (resume) and they open again by themselves;
+close one by hand and it stays closed next time. `call` also brings back its chats and the ids that continue each CLI's conversation, `summary` its
+summary, and `see-parent` its original session. `filetree` is not one of these: it opens only with `/filetree` (see above), and `replay-theater` is drawn per turn.
+
 ## summary
 
 - `/summary` opens a pane with the summary of the current session.
@@ -73,6 +79,7 @@ Try one without installing: `claude --plugin-dir ~/Claude-Plugins/plugins/summar
   fold into one line (`▸ 작업 N단계`, click to unfold) above the answer, which is drawn as markdown.
 - Several CLIs work at once: ask agy, switch to codex and ask it too; neither is interrupted. A CLI that finishes while another tab is
   shown gets a yellow tab until you open it.
+- **Narrow pane:** the pane is narrower than a terminal, so a table too wide for it (markdown with `|`, or drawn with box characters) is shown as a list, one item per row and one sub-item per column; narrow tables stay as they are. Agents are also told the pane width and asked not to draw box tables.
 - **Permission first:** every message to an agent starts with a ground rule: before changing code or files, running a command that
   changes something, or doing anything hard to undo, say the plan and wait for your go-ahead (your next message answers). Reading and
   explaining need none. The CLIs run in yolo mode, so this rule in the prompt is the only gate; it is a request the model follows, not a lock.

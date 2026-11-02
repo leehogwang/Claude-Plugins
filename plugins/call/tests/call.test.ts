@@ -22,9 +22,15 @@ const OUT: Record<string, string> = {
 
 function world(on: Parameters<Parameters<typeof test>[1]>[1]) {
   mock.store(on)
-  on('ui.open', () => ({ value: {} as never }))
+  const opened: string[] = [] // the panes opened, by id
+  on('ui.open', (_$: unknown, e: unknown) => {
+    opened.push((e as { id: string }).id)
+    return { value: {} as never }
+  })
   on('session.id', () => ({ value: 'sess-1' }))
   on('tool.call', () => ({ result: 'ok' }) as never) // what the tool itself would answer
+  on('session.start', (_$: unknown, e: unknown) => ({ cwd: (e as { cwd: string }).cwd }) as never) // core's part of entering a session
+  on('command.register', () => ({ value: {} }) as never)
   const state = { records: 7 }
   on('process.run', (_$: unknown, e: unknown) => {
     const argv = (e as { argv: string[] }).argv
@@ -47,7 +53,7 @@ function world(on: Parameters<Parameters<typeof test>[1]>[1]) {
     await holds[argv[0]!]
     return { value: { code: 0, signal: null } } as never
   } as never)
-  return { spawned, gates, holds, state }
+  return { spawned, gates, holds, state, opened }
 }
 
 const mount = ($: Parameters<Parameters<typeof test>[1]>[0]) =>
@@ -182,4 +188,45 @@ test('files being changed are flagged, two on one file warn, the Claude Code ses
   letCodex()
   await tick(200)
   expect(await ui.find({ type: 'Text', text: /train\.py\s+(agy|codex)/ })).toBeUndefined() // lifted with the turns
+})
+
+test('a table too wide for the pane becomes a list; a narrow one stays; the agent is told the width', async ($, on) => {
+  const { spawned } = world(on)
+  const answer = [
+    '| 항목 | 최적 방법 | 이유가 아주 길게 적힌 칸 | 또 다른 아주 긴 설명이 들어간 칸 |', '|---|---|---|---|',
+    '| N5k | RGB-D 부피 직접 회귀 | 사진과 깊이 정보로 양을 바로 추정할 수 있음 | 외부 지식 없이도 충분히 동작함 |',
+    '', '| a | b |', '|---|---|', '| 1 | 2 |', '',
+    '┌──────────┬───────────────────────────────────────────────┬──────────────────────────────────────────────┐',
+    '│ 122 처음 │ 3번 food_b (33.67), 4번 25-d (32.93~35.58)    │ 분해 + LLM 1인분 사전값 활용                 │',
+    '└──────────┴───────────────────────────────────────────────┴──────────────────────────────────────────────┘',
+  ].join('\n')
+  const saved = OUT.codex
+  OUT.codex = j({ type: 'thread.started', thread_id: 'cx-9' }, { type: 'item.completed', item: { type: 'agent_message', text: answer } })
+  await $.command.run({ command: 'call', args: 'codex' } as never)
+  const ui = await mount($)
+  await ui.input({ key: 'ask', text: 'table' })
+  OUT.codex = saved
+  const md = JSON.stringify(await ui.find({ type: 'Markdown', text: /N5k/ }))
+  expect(md).toContain('- **N5k**') // the wide table is a list now
+  expect(md).toContain('  - 최적 방법: RGB-D 부피 직접 회귀')
+  expect(md).toContain('| a | b |') // the narrow one is left alone
+  expect(md).not.toContain('┬') // and the box drawing is a list too, with its words kept
+  expect(md).toContain('- **122 처음**')
+  expect(prompt(spawned[0]!)).toContain('about 80 columns wide')
+})
+
+test('a pane that was open comes back with its chats when the session is entered again', async ($, on) => {
+  const { spawned, opened } = world(on)
+  await $.command.run({ command: 'call', args: 'codex' } as never)
+  const ui = await mount($)
+  await ui.input({ key: 'ask', text: 'hello' })
+
+  opened.length = 0
+  await $.session.start({ source: 'resume', cwd: '/w' } as never) // the session is entered again
+  expect(opened).toEqual(['call'])
+  const back = ui
+  expect(await back.find({ type: 'Markdown', text: /codex says hi/ })).toBeDefined() // its chat is there
+  await back.input({ key: 'ask', text: 'again' })
+  expect(spawned.at(-1)).toContain('cx-1') // and it goes on in the same conversation of the CLI
+
 })

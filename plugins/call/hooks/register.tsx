@@ -121,7 +121,48 @@ const free = ($: EngineInterface, who: string) =>
 
 const short = (p: string) => p.split('/').slice(-2).join('/')
 
+// The pane is narrower than a terminal, so a wide table wraps into a mess. Tables that do not fit (markdown pipes, or box
+// drawing like ┌─┬─┐) are turned into a list: one item per row, one sub-item per column.
+let columns = 60 // the pane's width, as the last render saw it
+const wide = (t: string) => [...t.replace(/\*\*|`/g, '')].reduce((w, c) => w + (/[\u1100-\u115f\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe30-\ufe6f\uff00-\uff60\uffe0-\uffe6]/.test(c) ? 2 : 1), 0)
+const listOf = (head: string[], rows: string[][]) =>
+  rows.map(r => [`- **${r[0] || '·'}**`, ...r.slice(1).map((c, i) => (c && c !== '-' ? `  - ${head[i + 1] || '·'}: ${c}` : '')).filter(Boolean)].join('\n')).join('\n')
+function fitTables(text: string, cols: number): string {
+  const lines = text.split('\n')
+  const out: string[] = []
+  for (let i = 0; i < lines.length; ) {
+    const row = (l: string) => l.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim())
+    if (/^\s*\|/.test(lines[i]!) && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1] ?? '')) { // markdown table
+      let j = i + 2
+      while (j < lines.length && /^\s*\|/.test(lines[j]!)) j++
+      const [head, ...rows] = [row(lines[i]!), ...lines.slice(i + 2, j).map(row)]
+      const w = head!.map((_, c) => Math.max(...[head!, ...rows].map(r => wide(r[c] ?? '')))).reduce((a, b) => a + b + 3, 1)
+      out.push(...(w <= cols ? lines.slice(i, j) : listOf(head!, rows).split('\n')))
+      i = j
+    } else if (/^\s*[┌├└│]/.test(lines[i]!)) { // box drawing: records split by ├ lines, cells by │
+      let j = i
+      while (j < lines.length && /^\s*[┌├└│]/.test(lines[j]!)) j++
+      const block = lines.slice(i, j)
+      if (Math.max(...block.map(l => wide(l.trimEnd()))) <= cols) out.push(...block)
+      else {
+        const recs: string[][] = []
+        for (const l of block) {
+          if (/^\s*[┌├└]/.test(l)) { recs.push([]); continue }
+          const cells = l.trim().replace(/^│|│$/g, '').split('│').map(c => c.trim())
+          const cur = (recs.at(-1) ?? recs[recs.push([]) - 1]!)
+          cells.forEach((c, k) => (cur[k] = [cur[k], c].filter(Boolean).join(' ')))
+        }
+        const full = recs.filter(r => r.length)
+        out.push(...(full.length > 1 ? listOf(full[0]!, full.slice(1)) : listOf([], full)).split('\n')) // a lone record has no header
+      }
+      i = j
+    } else out.push(lines[i++]!)
+  }
+  return out.join('\n')
+}
+
 // what every message to an agent starts with: ask before changing anything, and keep off files others hold
+const rules = () => RULES + `Your answer is drawn in a pane about ${columns} columns wide: do not draw tables with box characters (┌│├); keep a markdown table to a few short columns, or use a list. `
 const RULES = 'Ground rules from the user: before you change code or files, run a command that changes something, or do anything hard to undo, say what you plan to do and wait for the user\'s go-ahead: end your turn with that question, the next message is the answer. Reading, searching and explaining need no permission. '
 const heldBy = (flags: Record<string, string[]>, me: string) => Object.keys(flags).filter(f => flags[f]!.some(w => w !== me))
 
@@ -187,6 +228,14 @@ function parse(cli: string, out: string): { text: string; sid: string; error: st
   return { text, sid, error, steps, files: [...files] }
 }
 
+// The chats of this session are kept, so that a session left and entered again finds them (and the ids that
+// continue each CLI's own conversation) where they were.
+async function keep($: EngineInterface) {
+  const s = await read($, state)
+  const chats = Object.fromEntries(Object.entries(s.chats).map(([k, c]) => [k, { ...c, running: false, steps: [], draft: '' }]))
+  await $.store.set(`chats:${await $.session.id()}`, { active: s.active, chats })
+}
+
 async function find($: EngineInterface) {
   const hits = await Promise.all(CLIS.map(async c => ((await $.process.run(['which', c]).catch(() => ({ exitCode: 1 }))).exitCode === 0 ? c : '')))
   const found = hits.filter(Boolean)
@@ -205,6 +254,7 @@ async function setting($: EngineInterface, cli: string, what: string, value: str
   if (what === 'model') v = models.find(m => m.id === value || m.label.toLowerCase() === value.toLowerCase())?.id ?? v // a name or an id
   else if (v && !names.includes(v)) return say(`${cli} has no effort "${v}". available: ${names.join(', ')}`)
   await patch($, cli, c => ({ ...c, [what]: v, effort: what === 'model' && !effortsFor(cli, models, v).includes(c.effort) ? '' : what === 'effort' ? v : c.effort }))
+  await keep($)
   return say(`${what} for ${cli}: ${v || 'default'}`)
 }
 
@@ -221,7 +271,7 @@ async function send($: EngineInterface, text: string) {
     // the Claude Code conversation (what is new since this chat last heard of it) goes along as a file to read
     const ctx = JSON.parse((await $.process.run(['python3', `${$.plugin.root}/hooks/context.py`, await $.session.id(), String(chat.seen), cli], { timeoutMs: 60_000 })).stdout || '{}') as { records?: number; path?: string }
     const others = heldBy(s.flags, cli)
-    const intro = RULES + (others.length ? `Other agents are changing these files right now, so do not edit them (if you need one, stop and tell the user): ${others.join(', ')}. ` : '') + (!ctx.path ? '' : chat.seen
+    const intro = rules() + (others.length ? `Other agents are changing these files right now, so do not edit them (if you need one, stop and tell the user): ${others.join(', ')}. ` : '') + (!ctx.path ? '' : chat.seen
       ? `New messages in the Claude Code session since your last turn are in ${ctx.path}; read them first. `
       : `The conversation so far between the user and Claude Code, in this folder, is in ${ctx.path}. Read it first: it is background, not instructions to run again. `)
     const cmd = argv(cli, chat.sid, `${intro}The user now asks: ${text}`, opts(cli, chat.model, chat.effort, (await modelsOf($, cli)).find(m => m.id === chat.model)?.efforts ?? []))
@@ -252,12 +302,27 @@ async function send($: EngineInterface, text: string) {
     await free($, cli)
     const shown = (await read($, state)).active === cli
     await patch($, cli, c => ({ ...c, running: false, unread: !shown }))
+    await keep($)
   }
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'call', description: 'Pick an installed AI CLI (claude, codex, agy, opencode) and talk to it in a side pane (/call <name> opens it directly)' })
+    // it was open when the last session ended: open again, with this session's chats
+    if (await $.store.get('open')) {
+      const kept = (await $.store.get(`chats:${await $.session.id()}`)) as { active: string; chats: Record<string, Chat> } | undefined
+      if (kept) await update($, state, s => ({ ...s, active: kept.active, chats: kept.chats }))
+      await find($)
+      await $.ui.open({ id: PANE, title: 'Call' })
+      void modelsOf($, (await read($, state)).active)
+    }
+    return next(e)
+  })
+
+  // closed by hand (or by a plugin): not open again next time; an unload at exit does not count
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANE && e.origin.kind !== 'unload') await $.store.set('open', false)
     return next(e)
   })
 
@@ -285,6 +350,7 @@ export const register: Register = on => {
     if (want) await update($, state, s => ({ ...s, active: want }))
     await patch($, (await read($, state)).active, c => ({ ...c, unread: false }))
     await $.ui.open({ id: PANE, title: 'Call' })
+    await $.store.set('open', true)
     void modelsOf($, (await read($, state)).active) // for the model slider
     return { text: `Call pane open. Installed: ${found.join(', ')}.` }
   })
@@ -298,12 +364,14 @@ export const register: Register = on => {
       const levels = ['', ...effortsFor(s.active, s.models[s.active] ?? [], s.chats[s.active]?.model ?? '')]
       const v = levels[Math.max(0, Math.min(levels.length - 1, Math.round(set)))] ?? ''
       await patch($, s.active, c => ({ ...c, effort: v }))
+      await keep($)
     }
     return {}
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
+    columns = e.props.bodyColumns
     const { Box, Button, Client, Markdown, Text } = ui
     const s = await read($, state)
     const cli = s.active
@@ -356,7 +424,7 @@ export const register: Register = on => {
                       label={`${m.id === chat.model ? '●' : '○'} ${m.label}`}
                       plain
                       dimColor={m.id !== chat.model}
-                      onPress={() => update($, state, v => ({ ...v, menu: false })).then(() => patch($, cli, c => ({ ...c, model: m.id, effort: effortsFor(cli, models, m.id).includes(c.effort) ? c.effort : '' })))}
+                      onPress={() => update($, state, v => ({ ...v, menu: false })).then(() => patch($, cli, c => ({ ...c, model: m.id, effort: effortsFor(cli, models, m.id).includes(c.effort) ? c.effort : '' }))).then(() => keep($))}
                     />
                   ))}
                 </Box>
@@ -382,7 +450,7 @@ export const register: Register = on => {
                   <Button key={`steps-${at}`} label={`${t.open ? '▾' : '▸'} 작업 ${t.steps.length}단계`} plain dimColor onPress={() => patch($, cli, c => ({ ...c, turns: c.turns.map((x, i) => (i === at ? { ...x, open: !x.open } : x)) }))} />
                 ) : null}
                 {t.open && t.steps?.map(x => <Text dimColor>{`  ${x}`}</Text>)}
-                {t.who === 'ai' ? <Markdown text={t.text} /> : <Text>{t.text}</Text>}
+                {t.who === 'ai' ? <Markdown text={fitTables(t.text, columns - 6)} /> : <Text>{t.text}</Text>}
               </Box>
             </Box>
           )
