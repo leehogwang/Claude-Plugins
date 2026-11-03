@@ -315,3 +315,20 @@ test('clear while a CLI works stops it; pressed again it asks before it clears f
   await ui.press({ key: 'clear-yes' })
   expect(await ui.find({ type: 'Markdown', text: /stopped/ })).toBeUndefined() // gone
 })
+
+test('↺ goes back to the model that was in use before, with the effort it had; pressed again it returns', async ($, on) => {
+  const { spawned } = world(on)
+  await $.command.run({ command: 'call', args: 'agy' } as never)
+  const ui = await mount($)
+  await tick()
+  expect(await ui.find({ type: 'Button', key: 'model-back' })).toBeUndefined() // nothing before yet
+  await ui.press({ key: 'effort-next' }) // flash: medium -> high
+  await ui.press({ key: 'model' })
+  await ui.press({ key: 'm:gpt-oss-120b' })
+  await ui.press({ key: 'model-back' })
+  await ui.input({ key: 'ask', text: 'a' })
+  expect(spawned.at(-1)![spawned.at(-1)!.indexOf('--model') + 1]).toBe('gemini-3.8-flash-high')
+  await ui.press({ key: 'model-back' })
+  await ui.input({ key: 'ask', text: 'b' })
+  expect(spawned.at(-1)![spawned.at(-1)!.indexOf('--model') + 1]).toBe('gpt-oss-120b-medium')
+})

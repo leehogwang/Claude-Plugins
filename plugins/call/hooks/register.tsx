@@ -13,7 +13,7 @@ const CLIS = ['claude', 'codex', 'agy', 'opencode'] // ponytail: fixed list, add
 const SHOWN = 40 // the latest messages drawn
 
 const state = atom({ plugin: 'call', key: 'chats' } as const, { flags: {}, found: [], models: {}, active: '', hint: false, menu: false, confirm: false, chats: {} } as Chats)
-const blank: Chat = { sid: '', seen: 0, model: '', effort: '', draft: '', turns: [], steps: [], running: false, unread: false, error: '', failed: '', snap: '', pending: 0, noted: false }
+const blank: Chat = { sid: '', seen: 0, model: '', effort: '', draft: '', turns: [], steps: [], running: false, unread: false, error: '', failed: '', prevModel: '', prevEffort: '', snap: '', pending: 0, noted: false }
 
 const patch = ($: EngineInterface, cli: string, f: (c: Chat) => Chat) =>
   update($, state, s => ({ ...s, chats: { ...s.chats, [cli]: f(s.chats[cli] ?? blank) } }))
@@ -297,6 +297,18 @@ async function find($: EngineInterface) {
   return found
 }
 
+// A model change keeps what was in use before (model and its effort), so the ↺ button can go back to it.
+function withModel(cli: string, models: Model[], c: Chat, id: string): Chat {
+  const cur = c.model || models[0]?.id || ''
+  const next = { ...c, model: id, effort: effortsFor(cli, models, id).includes(c.effort) ? c.effort : '' }
+  return !id || id === cur ? next : { ...next, prevModel: cur, prevEffort: pickEffort(effortsFor(cli, models, cur), c.effort) }
+}
+// ↺: back to the previous model and effort; the ones left become the "previous", so pressing again returns
+function goBack(cli: string, models: Model[], c: Chat): Chat {
+  const cur = c.model || models[0]?.id || ''
+  return { ...c, model: c.prevModel, effort: c.prevEffort, prevModel: cur, prevEffort: pickEffort(effortsFor(cli, models, cur), c.effort) }
+}
+
 // /model and /effort typed in the pane: show the choices, or set one for this CLI's chat ("default" clears it)
 async function setting($: EngineInterface, cli: string, what: string, value: string) {
   const say = (t: string) => patch($, cli, c => ({ ...c, error: '', turns: [...c.turns, { who: 'user', text: `/${what}${value ? ` ${value}` : ''}` }, { who: 'ai', text: t }] }))
@@ -307,7 +319,7 @@ async function setting($: EngineInterface, cli: string, what: string, value: str
   let v = value === 'default' ? '' : value
   if (what === 'model') v = models.find(m => m.id === value || m.label.toLowerCase() === value.toLowerCase())?.id ?? v // a name or an id
   else if (v && !names.includes(v)) return say(`${cli} has no effort "${v}". available: ${names.join(', ')}`)
-  await patch($, cli, c => ({ ...c, [what]: v, effort: what === 'model' && !effortsFor(cli, models, v).includes(c.effort) ? '' : what === 'effort' ? v : c.effort }))
+  await patch($, cli, c => (what === 'model' ? withModel(cli, models, c, v) : { ...c, effort: v }))
   await keep($)
   return say(`${what} for ${cli}: ${v || 'default'}`)
 }
@@ -539,14 +551,19 @@ export const register: Register = on => {
                       label={`${m.id === cur ? '●' : '○'} ${m.label}`}
                       plain
                       dimColor={m.id !== cur}
-                      onPress={() => update($, state, v => ({ ...v, menu: false })).then(() => patch($, cli, c => ({ ...c, model: m.id, effort: effortsFor(cli, models, m.id).includes(c.effort) ? c.effort : '' }))).then(() => keep($))}
+                      onPress={() => update($, state, v => ({ ...v, menu: false })).then(() => patch($, cli, c => withModel(cli, models, c, m.id))).then(() => keep($))}
                     />
                   ))}
                 </Box>
               ) : (
               <Box flexDirection="row" columnGap={1}>
                 <Box flexGrow={1} />
-                <Button key="model" label={`${models.find(m => m.id === cur)?.label ?? (cur || '…')} ▴`} plain onPress={() => update($, state, v => ({ ...v, menu: !v.menu }))} />
+                <Box width={2} flexShrink={0}>{/* a fixed place just left of the model: ↺ shows here once a model was changed */}
+                  {chat.prevModel ? <Button key="model-back" label="↺" plain onPress={() => patch($, cli, c => goBack(cli, models, c)).then(() => keep($))} /> : null}
+                </Box>
+                <Box width={Math.min(22, Math.max(6, ...models.map(m => wide(m.label))) + 2)} flexShrink={0}>
+                  <Button key="model" label={`${models.find(m => m.id === cur)?.label ?? (cur || '…')} ▴`} plain onPress={() => update($, state, v => ({ ...v, menu: !v.menu }))} />
+                </Box>
                 <Button key="effort-prev" label="◀" plain dimColor={lv <= 0} onPress={() => step(-1)} />
                 <Box width={7} flexShrink={0} justifyContent="center">
                   <Text bold color={color}>{levels[lv] ?? ''}</Text>
