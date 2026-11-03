@@ -266,6 +266,7 @@ test('math with an exponent is drawn as plain text; the effort shown is the effo
   await ui.input({ key: 'ask', text: 'again' })
   expect(prompt(spawned[1]!)).toContain('write your own short summary')
   expect(prompt(spawned[1]!)).toContain('/ctx/notes.md')
+  expect(prompt(spawned[1]!)).toContain('do not ask first') // the ask-first rule must not hold the notes back
 })
 
 test('a summary is asked for once the conversation given since the last one adds up, not only when one turn is big; a failed read says so and can be retried', async ($, on) => {
@@ -292,4 +293,25 @@ test('a summary is asked for once the conversation given since the last one adds
   await ui.press({ key: 'retry' })
   expect(spawned.length).toBe(n + 1)
   expect(prompt(spawned.at(-1)!)).toContain('The user now asks: lost?')
+})
+
+test('clear while a CLI works stops it; pressed again it asks before it clears for good', async ($, on) => {
+  const { holds } = world(on)
+  await $.command.run({ command: 'call', args: 'codex' } as never)
+  const ui = await mount($)
+  let release = () => {}
+  holds.codex = new Promise<void>(r => { release = r })
+  void ui.input({ key: 'ask', text: 'long job' })
+  await tick(300)
+  await ui.press({ key: 'clear' }) // working: this stops it
+  await tick(100)
+  expect(await ui.find({ type: 'Markdown', text: /stopped/ })).toBeDefined()
+  release()
+  await ui.press({ key: 'clear' }) // idle: asks
+  expect(await ui.find({ type: 'Text', text: /Clear this chat for good/ })).toBeDefined()
+  await ui.press({ key: 'clear-no' })
+  expect(await ui.find({ type: 'Markdown', text: /stopped/ })).toBeDefined() // kept
+  await ui.press({ key: 'clear' })
+  await ui.press({ key: 'clear-yes' })
+  expect(await ui.find({ type: 'Markdown', text: /stopped/ })).toBeUndefined() // gone
 })

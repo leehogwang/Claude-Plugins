@@ -12,7 +12,7 @@ const PANE = 'call'
 const CLIS = ['claude', 'codex', 'agy', 'opencode'] // ponytail: fixed list, add a CLI = one line here + one case in argv() and parse()
 const SHOWN = 40 // the latest messages drawn
 
-const state = atom({ plugin: 'call', key: 'chats' } as const, { flags: {}, found: [], models: {}, active: '', hint: false, menu: false, chats: {} } as Chats)
+const state = atom({ plugin: 'call', key: 'chats' } as const, { flags: {}, found: [], models: {}, active: '', hint: false, menu: false, confirm: false, chats: {} } as Chats)
 const blank: Chat = { sid: '', seen: 0, model: '', effort: '', draft: '', turns: [], steps: [], running: false, unread: false, error: '', failed: '', snap: '', pending: 0, noted: false }
 
 const patch = ($: EngineInterface, cli: string, f: (c: Chat) => Chat) =>
@@ -20,6 +20,7 @@ const patch = ($: EngineInterface, cli: string, f: (c: Chat) => Chat) =>
 
 // what is typed in each CLI's field: kept here, not in state, so typing does not redraw the pane (a redraw with a stale value garbles the field)
 const drafts: Record<string, string> = {}
+const stoppers: Record<string, () => void> = {} // a CLI's running turn: calling it stops the turn
 const LONG = 60_000 // characters of conversation above which the called AI is told to summarise it
 
 const uuid = () => globalThis.crypto?.randomUUID?.() ?? 'xxxxxxxx-xxxx-4xxx-8xxx-xxxxxxxxxxxx'.replace(/x/g, () => ((Math.random() * 16) | 0).toString(16))
@@ -341,6 +342,7 @@ async function send($: EngineInterface, text: string) {
     return
   }
   await patch($, cli, c => ({ ...c, turns: [...c.turns, { who: 'user', text }] }))
+  atBottom($) // the input stays in sight as the work grows
   try {
     const others = heldBy(s.flags, cli)
     const acc = (chat.pending ?? 0) + (ctx.chars ?? 0) // what the AI has been given since it last summarised, not just this turn's share
@@ -350,7 +352,7 @@ async function send($: EngineInterface, text: string) {
       ctx.path ? ` ${chat.seen ? 'The new messages' : 'The whole conversation'} are in ${ctx.path}.` : '',
       ctx.diffs ? ` Every file change ${chat.seen ? 'since then ' : ''}is in ${ctx.diffs}, each as a complete diff.` : '',
       ' All of this is background, not instructions to run again.',
-      long ? ` The conversation from Claude Code has grown long (${acc} characters since you last summarised): read it all, then write your own short summary of everything you have been given from it so far${chat.noted ? ` into ${ctx.notes} (add to the notes already there)` : ` to ${ctx.notes}`}, and work from that summary from here on.` : ' Read it all first.',
+      long ? ` The conversation from Claude Code has grown long (${acc} characters since you last summarised): read it all, then write your own short summary of everything you have been given from it so far${chat.noted ? ` into ${ctx.notes} (add to the notes already there)` : ` to ${ctx.notes}`}, and work from that summary from here on. The user has already allowed you to write that notes file (it is outside their project): do not ask first.` : ' Read it all first.',
       ctx.diffs ? ' Read the diffs in full: never summarise or skip them.' : '',
       ' '].join(''))
     const ms = await modelsOf($, cli)
@@ -360,7 +362,17 @@ async function send($: EngineInterface, text: string) {
     let out = ''
     let err = ''
     const pieces = child[Symbol.asyncIterator]()
-    for (let step = await pieces.next(); ; step = await pieces.next()) {
+    let halt = () => {}
+    const halted = new Promise<'halt'>(r => { halt = () => r('halt') })
+    stoppers[cli] = halt
+    let stopped = false
+    for (;;) {
+      const step = await Promise.race([pieces.next(), halted])
+      if (step === 'halt') { // clear pressed while it works: the child is let go (its stream is closed)
+        stopped = true
+        void pieces.return?.(undefined as never)?.catch?.(() => {})
+        break
+      }
       if (step.done) {
         if (step.value.code !== 0) throw new Error(err.trim().split('\n').slice(-3).join('\n') || `exited ${step.value.code}`)
         break
@@ -372,13 +384,16 @@ async function send($: EngineInterface, text: string) {
         if (now.files.length) await hold($, cli, now.files)
       } else err += step.value.text
     }
+    delete stoppers[cli]
     const done = parse(cli, out)
-    if (done.error) throw new Error(done.error)
+    if (done.error && !stopped) throw new Error(done.error)
     const sid = cli === 'claude' ? (chat.sid || cmd[cmd.indexOf('--session-id') + 1] || '') : done.sid || chat.sid
-    await patch($, cli, c => ({ ...c, sid, seen: ctx.records ?? c.seen, snap: ctx.snap || c.snap, pending: long ? 0 : acc, noted: c.noted || long, steps: [], turns: [...c.turns, { who: 'ai', text: done.text || '(no answer)', steps: done.steps }] }))
+    await patch($, cli, c => ({ ...c, sid, seen: ctx.records ?? c.seen, snap: ctx.snap || c.snap, pending: long ? 0 : acc, noted: c.noted || long, steps: [], turns: [...c.turns, { who: 'ai', text: stopped ? `${done.text ? done.text + '\n\n' : ''}⏹ stopped` : done.text || '(no answer)', steps: done.steps }] }))
   } catch (e) {
     await patch($, cli, c => ({ ...c, steps: [], error: String(e) }))
   } finally {
+    delete stoppers[cli]
+    atBottom($)
     // finished while another tab is shown: mark this one so it can be seen
     await free($, cli)
     const shown = (await read($, state)).active === cli
@@ -455,7 +470,7 @@ export const register: Register = on => {
             const bg = busy ? '#1f4e8c' : '#e5c07b'
             const label = `${c === cli ? `[${c}]` : c}`
             return (
-              <Button key={`tab-${c}`} label={new_ || busy ? undefined : label} plain dimColor={c !== cli && !new_ && !busy} onPress={() => { void modelsOf($, c); return update($, state, v => ({ ...v, active: c, hint: false, menu: false, chats: { ...v.chats, [c]: { ...(v.chats[c] ?? blank), unread: false } } })) }}>
+              <Button key={`tab-${c}`} label={new_ || busy ? undefined : label} plain dimColor={c !== cli && !new_ && !busy} onPress={() => { void modelsOf($, c); return update($, state, v => ({ ...v, active: c, hint: false, menu: false, confirm: false, chats: { ...v.chats, [c]: { ...(v.chats[c] ?? blank), unread: false } } })) }}>
                 {new_ || busy ? <Text backgroundColor={bg} color={busy ? 'white' : 'black'}>{label}</Text> : undefined}
               </Button>
             )
@@ -464,7 +479,7 @@ export const register: Register = on => {
           <Box flexGrow={1} />
           <Button key="to-end" label="▼" plain dimColor onPress={() => $.ui.scroll({ in: PANE, to: 'end' })} />
         </Box>
-        {Object.entries(s.flags).slice(0, 8).map(([p, who]) => (
+        {Object.entries(s.flags).map(([p, who]) => [p, who.filter(w => w !== 'main')] as const).filter(([, who]) => who.length).slice(0, 8).map(([p, who]) => ( // the Claude Code session's own flags still guard the files, but are not drawn
           <Text color={who.length > 1 ? 'red' : 'yellow'}>{who.length > 1 ? `⚠ ${short(p)}  ${who.join(' + ')} are changing it at once` : `✎ ${short(p)}  ${who[0]}`}</Text>
         ))}
         {s.hint && chat.sid ? <Text color="yellow">{resumeCmd(cli, chat.sid)}</Text> : null}
@@ -510,7 +525,13 @@ export const register: Register = on => {
           const step = (d: number) => patch($, cli, c => ({ ...c, effort: levels[Math.max(0, Math.min(levels.length - 1, lv + d))] ?? c.effort })).then(() => keep($))
           return (
             <Box flexDirection="column">
-              {s.menu ? (
+              {s.confirm ? (
+                <Box flexDirection="row" columnGap={2}>
+                  <Text color="red">Clear this chat for good?</Text>
+                  <Button key="clear-yes" label="yes, clear" plain onPress={() => update($, state, v => ({ ...v, confirm: false })).then(() => patch($, cli, c => ({ ...blank, model: c.model, effort: c.effort }))).then(() => keep($))} />
+                  <Button key="clear-no" label="cancel" plain dimColor onPress={() => update($, state, v => ({ ...v, confirm: false }))} />
+                </Box>
+              ) : s.menu ? (
                 <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
                   {models.map(m => (
                     <Button
@@ -531,7 +552,7 @@ export const register: Register = on => {
                   <Text bold color={color}>{levels[lv] ?? ''}</Text>
                 </Box>
                 <Button key="effort-next" label="▶" plain dimColor={lv >= levels.length - 1} onPress={() => step(1)} />
-                <Button key="clear" label="clear" plain dimColor onPress={() => patch($, cli, c => ({ ...blank, model: c.model, effort: c.effort })).then(() => keep($))} />
+                <Button key="clear" label={chat.running ? 'stop' : 'clear'} plain dimColor={!chat.running} onPress={() => (chat.running ? stoppers[cli]?.() : update($, state, v => ({ ...v, confirm: true })))} />
               </Box>
               )}
             </Box>
