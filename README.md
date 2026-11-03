@@ -95,7 +95,7 @@ summary, and `see-parent` its original session. `filetree` is not one of these: 
   turn ends. Two agents on one file show a red `⚠`. Agents are told which files others hold when you message them, and the Claude Code
   session itself is refused an Edit or Write on a flagged file (its own edits are flagged for the agents too, until its turn ends).
   Limits: an agent's own write cannot be stopped from here, and codex reports a change only after it is made.
-- Every CLI has its own **model** and **effort**, shown above the input, at its right (with **clear**, which empties this tab's chat). **model** is a dropdown: click it (or focus it and press Enter), then click a model;
+- Every CLI has its own **model** and **effort**, shown above the input, at its right (with **clear**: while the CLI works it reads **stop** and stops the turn; otherwise it asks "Clear this chat for good?" before it empties this tab's chat). **model** is a dropdown: click it (or focus it and press Enter), then click a model;
   **effort** steps with the ◀ ▶ arrows around its name (`low` … `max`). The colour says it at a glance:
   effort runs from light red (low) to a deeper red (max). agy lists each model once (Gemini 4 Argon, Gemini 3.8 Flash,
   Claude Opus 5.5, Claude Sonnet 5.5, GPT-OSS 120B) and offers only the efforts that model has; the two are joined into agy's own id
