@@ -44,8 +44,8 @@
   }
 
   function applyFlowHighlights(stepIdx, step, meta) {
-    if (!svgEl) return;
-    svgEl.classList.toggle("flow-dim-mode", Boolean(meta && meta.dimOthers && !flowPanelEl.classList.contains("hide")));
+    if (!svgEl || !flowPanelEl || flowPanelEl.classList.contains("hide")) return;
+    svgEl.classList.toggle("flow-dim-mode", Boolean(meta && meta.dimOthers));
     svgEl.querySelectorAll(".flow-active, .flow-visited").forEach((el) => {
       el.classList.remove("flow-active", "flow-visited");
     });
