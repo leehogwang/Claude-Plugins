@@ -181,7 +181,7 @@ the real error before reporting.
 
 Minimal Rust-WASM VS Code custom editor (`plugins/svg-lens/viewer`) for inspecting ultra-wide `nn-chart` SVGs (`100k+ px`), paired with the `nn-chart` skill (`plugins/svg-lens/skills/nn-chart/SKILL.md`).
 
-- **Install viewer in VS Code**: `Extensions` → `...` → `Install from VSIX...` → select `plugins/svg-lens/viewer/svg-lens-0.1.0.vsix`.
+- **Install viewer in VS Code**: `Extensions` → `...` → `Install from VSIX...` → select `plugins/svg-lens/viewer/svg-lens-0.1.1.vsix`.
 - **Features**: native SVG `viewBox` pan/zoom, Rust-WASM minimap, semantic zoom (`LOD`), click-to-collapse containers (`Collapse` / header click), text search (`Enter`), bottleneck jump list (`Issues`), and `<metadata id="nn-summary">` stage overview (`Modules`).
 - **Build Rust WASM from source** (optional):
   ```sh

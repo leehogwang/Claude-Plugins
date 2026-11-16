@@ -1,6 +1,6 @@
 {
   "name": "svg-lens",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Rust-WASM powered VS Code SVG viewer (pan, zoom, minimap, LOD, collapsible containers, search, nn-summary) + nn-chart skill",
   "author": {
     "name": "leehogwang"

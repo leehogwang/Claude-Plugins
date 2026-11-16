@@ -110,7 +110,7 @@ INPUT_ICONS = {
    - `chart.svg`의 `</svg>` 직전에 모델 전체를 4~8개 상위 단계로 요약한 JSON을 `<metadata id="nn-summary">{"title": "...", "stages": [{"title": "1. ...", "summary": "...", "match": "<컨테이너 제목 부분문자열>"}]}</metadata>` 형식으로 삽입합니다.
    - 이 메타데이터가 있으면 뷰어가 줌아웃(`LOD`) 및 `Modules` 목차에서 `"입력 레인 · ..."` 대신 사람이 읽는 단계별 제목과 요약을 표시합니다.
 4. **응답 시 `SVG Lens` 뷰어 설치·열람 안내 (필수)**:
-   - 생성된 `chart.svg`는 가로 수만~십수만 픽셀의 초대형 SVG이므로, 최종 답변에서 사용자에게 **VS Code 확장 `SVG Lens`** (`Claude-Plugins/plugins/svg-lens/viewer/svg-lens-0.1.0.vsix`)를 `Extensions → ... → Install from VSIX...`로 설치한 뒤 `chart.svg`를 열어 **`Flow`(스텝별 실행 흐름 · 코드 줄 · 텐서/진단 인스펙터) · `LOD`(시맨틱 줌) · `Modules`(단계 요약 목차) · `Collapse`(블록 접기/펼치기) · `Issues`(병목 점프)**로 탐색할 수 있음을 반드시 안내합니다.
+   - 생성된 `chart.svg`는 가로 수만~십수만 픽셀의 초대형 SVG이므로, 최종 답변에서 사용자에게 **VS Code 확장 `SVG Lens`** (`Claude-Plugins/plugins/svg-lens/viewer/svg-lens-0.1.1.vsix`)를 `Extensions → ... → Install from VSIX...`로 설치한 뒤 `chart.svg`를 열어 **`Flow`(스텝별 실행 흐름 · 코드 줄 · 텐서/진단 인스펙터) · `LOD`(시맨틱 줌) · `Modules`(단계 요약 목차) · `Collapse`(블록 접기/펼치기) · `Issues`(병목 점프)**로 탐색할 수 있음을 반드시 안내합니다.
 
 ---
 

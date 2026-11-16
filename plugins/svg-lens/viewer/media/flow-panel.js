@@ -193,10 +193,10 @@
         const stats = [];
         if (t.dtype) stats.push(escapeHtml(t.dtype));
         if (t.requires_grad !== undefined) stats.push(t.requires_grad ? 'grad' : 'frozen');
-        if (t.min !== undefined && t.max !== undefined) stats.push(`min=${t.min} max=${t.max}`);
-        if (t.mean !== undefined && t.std !== undefined) stats.push(`mean=${t.mean} std=${t.std}`);
-        if (t.nan_count) stats.push(`<span class="flow-warn">NaN:${t.nan_count}</span>`);
-        if (t.inf_count) stats.push(`<span class="flow-warn">Inf:${t.inf_count}</span>`);
+        if (t.min !== undefined && t.max !== undefined) stats.push(`min=${escapeHtml(t.min)} max=${escapeHtml(t.max)}`);
+        if (t.mean !== undefined && t.std !== undefined) stats.push(`mean=${escapeHtml(t.mean)} std=${escapeHtml(t.std)}`);
+        if (t.nan_count) stats.push(`<span class="flow-warn">NaN:${escapeHtml(t.nan_count)}</span>`);
+        if (t.inf_count) stats.push(`<span class="flow-warn">Inf:${escapeHtml(t.inf_count)}</span>`);
         return `
           <tr>
             <td class="flow-kv-k">${escapeHtml(t.name || 'tensor')}</td>
