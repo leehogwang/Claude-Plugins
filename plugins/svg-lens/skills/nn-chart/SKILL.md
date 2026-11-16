@@ -106,9 +106,10 @@ INPUT_ICONS = {
 ## 생성 후 검증 · 요약 메타데이터 삽입 및 뷰어 안내
 1. `<출력_디렉토리>/report.json`에서 `"completeness": {"ok": true}` 및 `"dissolved_cycle_containers": []`인지 확인합니다 (`dissolved_cycle_containers`가 비어 있지 않다면 `VIEW`에서 서브모듈 앞뒤 줄 번호를 해당 서브모듈과 함께 묶어 순환을 제거합니다).
 2. `.labels.ko.json` 검증을 통과하여 모든 컨테이너와 입출력에 한국어 제목과 설명이 들어갔는지 확인합니다.
-3. **파이프라인 요약(`<metadata id="nn-summary">`) 및 칩 호버 툴팁(`<metadata id="nn-tips">`) 메타데이터 삽입**:
+3. **파이프라인 요약(`<metadata id="nn-summary">`), 칩 호버 툴팁(`<metadata id="nn-tips">`) 및 자연어 해설 마크다운(`README.md`) 생성**:
    - `chart.svg`의 `</svg>` 직전에 모델 전체를 4~8개 상위 단계로 요약한 JSON을 `<metadata id="nn-summary">{"title": "...", "stages": [{"title": "1. ...", "summary": "...", "match": "<컨테이너 제목 부분문자열>"}]}</metadata>` 형식으로 삽입합니다.
    - 같은 위치에 `gt`, `any`, `getitem[:,None]` 등 저수준 연산 칩의 의미와 원본 코드를 설명하는 `<metadata id="nn-tips">{"chips": {"<칩 텍스트>": {"meaning": "<한글 1줄 역할>", "code": "<원본 코드 1줄>", "io": "<입출력 의미>"}}}</metadata>`도 함께 삽입합니다.
    - 이 메타데이터가 있으면 뷰어가 줌아웃(`LOD`) · `Modules` 목차에서 단계별 요약을 보여주고, 개별 칩에 마우스를 올릴 때 호버 툴팁으로 역할과 원본 코드를 띄웁니다.
+   - `<출력_디렉토리>/README.md` 파일도 함께 생성하여 **모델 전체 흐름(입력→핵심 블록→출력), 단계별 자연어 해설(마스크/shape 조작 등 보조 연산 의도 포함), `report.json` 기반 병목·진단 요약**을 읽기 쉬운 한국어 문서로 출력합니다.
 4. **응답 시 `SVG Lens` 뷰어 설치·열람 안내 (필수)**:
    - 생성된 `chart.svg`는 가로 수만~십수만 픽셀의 초대형 SVG이므로, 최종 답변에서 사용자에게 **VS Code 확장 `SVG Lens`** (`Claude-Plugins/plugins/svg-lens/viewer/svg-lens-0.1.1.vsix`)를 `Extensions → ... → Install from VSIX...`로 설치한 뒤 `chart.svg`를 열어 **칩 호버 툴팁 · `LOD`(시맨틱 줌) · `Modules`(단계 요약 목차) · `Collapse`(블록 접기/펼치기) · `Issues`(병목 점프)**로 탐색할 수 있음을 반드시 안내합니다.
