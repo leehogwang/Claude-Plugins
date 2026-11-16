@@ -1,4 +1,5 @@
 const vscode = require("vscode");
+const fs = require("fs");
 const path = require("path");
 
 class SvgLensProvider {
@@ -21,6 +22,9 @@ class SvgLensProvider {
     const jsUri = webview.asWebviewUri(
       vscode.Uri.file(path.join(this.context.extensionPath, "media", "viewer.js"))
     );
+    const flowJsUri = webview.asWebviewUri(
+      vscode.Uri.file(path.join(this.context.extensionPath, "media", "flow-panel.js"))
+    );
     const wasmUri = webview.asWebviewUri(
       vscode.Uri.file(path.join(this.context.extensionPath, "media", "svg_lens_wasm.wasm"))
     );
@@ -36,6 +40,7 @@ class SvgLensProvider {
 </head>
 <body>
 <div id="bar">
+  <button id="flowBtn">Flow</button>
   <button id="modBtn">Modules</button>
   <button id="fitH">Fit H</button>
   <button id="fitAll">Fit</button>
@@ -54,17 +59,47 @@ class SvgLensProvider {
   <button id="diagBtn" class="on">Diag</button>
   <button id="listBtn">Issues <span id="iCnt">0</span></button>
 </div>
+<div id="flowPanel" class="hide"></div>
 <div id="vp"><div id="stage"></div><div id="macro"></div></div>
 <div id="mods" class="hide"><div id="modList"></div></div>
 <div id="mm"><div id="mmBox"><div id="mmRect"></div></div></div>
 <div id="side" class="hide"><div id="list"></div></div>
 <script nonce="${nonce}">window.__WASM_URI__ = "${wasmUri}";</script>
+<script nonce="${nonce}" src="${flowJsUri}"></script>
 <script nonce="${nonce}" src="${jsUri}"></script>
 </body>
 </html>`;
 
+    const loadSiblingTrace = () => {
+      try {
+        const svgPath = document.uri.fsPath;
+        if (!svgPath) return null;
+        const dir = path.dirname(svgPath);
+        const base = path.basename(svgPath, path.extname(svgPath));
+        const candidates = [
+          path.join(dir, `${base}.trace.json`),
+          path.join(dir, "trace.json"),
+          path.join(dir, "report.json"),
+        ];
+        for (const p of candidates) {
+          if (fs.existsSync(p)) {
+            const raw = fs.readFileSync(p, "utf8");
+            const parsed = JSON.parse(raw);
+            if (parsed && Array.isArray(parsed.steps) && parsed.steps.length > 0) {
+              return parsed;
+            }
+          }
+        }
+      } catch (_) {}
+      return null;
+    };
+
     const postSvg = () => {
       webview.postMessage({ type: "svg", text: document.getText() });
+      const trace = loadSiblingTrace();
+      if (trace) {
+        webview.postMessage({ type: "trace", trace });
+      }
     };
 
     const sub = vscode.workspace.onDidChangeTextDocument((e) => {
