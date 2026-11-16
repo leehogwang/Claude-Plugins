@@ -1,0 +1,31 @@
+{
+  "name": "svg-lens",
+  "displayName": "SVG Lens",
+  "description": "Minimal pan, zoom, minimap, and search viewer for large SVG files.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Visualization"
+  ],
+  "activationEvents": [
+    "onCustomEditor:svgLens.viewer"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "svgLens.viewer",
+        "displayName": "SVG Lens",
+        "selector": [
+          {
+            "filenamePattern": "*.svg"
+          }
+        ],
+        "priority": "default"
+      }
+    ]
+  }
+}

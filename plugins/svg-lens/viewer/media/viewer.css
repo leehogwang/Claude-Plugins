@@ -1,0 +1,72 @@
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; width: 100%; height: 100%;
+  overflow: hidden; background: #141416; color: #e4e4e7;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+#bar {
+  position: fixed; top: 0; left: 0; right: 0; height: 40px; z-index: 30;
+  display: flex; align-items: center; gap: 6px; padding: 0 10px;
+  background: #18181b; border-bottom: 1px solid #2e2e34;
+}
+button, input {
+  height: 26px; border-radius: 4px; border: 1px solid #3f3f46;
+  background: #27272a; color: #e4e4e7; font-size: 12px; padding: 0 8px;
+}
+button { cursor: pointer; white-space: nowrap; }
+button:hover { background: #3f3f46; }
+button.on { background: #52525b; border-color: #a1a1aa; color: #fafafa; }
+input { width: 170px; outline: none; }
+input:focus { border-color: #a1a1aa; }
+.sep { width: 1px; height: 18px; background: #2e2e34; margin: 0 2px; }
+.muted { font-size: 11px; color: #a1a1aa; min-width: 34px; text-align: center; }
+#vp {
+  position: fixed; top: 40px; left: 0; right: 0; bottom: 0;
+  overflow: hidden; cursor: grab; background: #f4f4f5;
+}
+#vp.drag { cursor: grabbing; }
+#stage { position: absolute; inset: 0; }
+#stage svg { display: block; width: 100%; height: 100%; }
+#macro { position: absolute; inset: 0; pointer-events: none; z-index: 12; }
+.m-pill {
+  position: absolute; pointer-events: auto; cursor: pointer;
+  background: rgba(24, 24, 27, 0.90); color: #f4f4f5; border: 1px solid #52525b;
+  border-radius: 4px; padding: 3px 7px; font-size: 11px; font-weight: 600;
+  white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis;
+  transform: translate(0, -100%);
+}
+.m-pill:hover { background: #3f3f46; }
+#mm {
+  position: fixed; left: 10px; bottom: 10px; width: 260px; height: 58px; z-index: 20;
+  background: #18181b; border: 1px solid #3f3f46; border-radius: 4px; padding: 3px;
+  cursor: crosshair;
+}
+#mmBox { position: relative; width: 100%; height: 100%; background: #e4e4e7; border-radius: 2px; overflow: hidden; }
+#mmRect { position: absolute; border: 1.5px solid #27272a; background: rgba(24, 24, 27, 0.16); pointer-events: none; }
+#side, #mods {
+  position: fixed; top: 40px; width: 270px; bottom: 0; z-index: 25;
+  background: #18181b; overflow-y: auto; padding: 8px;
+}
+#side { right: 0; border-left: 1px solid #2e2e34; }
+#mods { left: 0; border-right: 1px solid #2e2e34; }
+#side.hide, #mods.hide { display: none; }
+.item, .m-row {
+  padding: 6px 8px; margin-bottom: 5px; border-radius: 4px;
+  background: #27272a; cursor: pointer; font-size: 11px;
+}
+.item { border-left: 3px solid #a16207; }
+.item.brk { border-left-color: #b91c1c; }
+.m-row { border-left: 3px solid #52525b; }
+.m-row.d1 { margin-left: 10px; border-left-color: #3f3f46; }
+.item:hover, .m-row:hover { background: #3f3f46; }
+.item .t, .m-row .t { font-weight: 600; color: #f4f4f5; word-break: break-all; }
+.item .m, .m-row .m { color: #a1a1aa; margin-top: 2px; }
+.hl { outline: 3px solid #27272a; outline-offset: 2px; }
+
+/* Semantic Zoom (LOD) & Collapsible Containers */
+.ctr > .hdr { cursor: pointer; }
+.ctr.collapsed > .body { display: none !important; }
+.ctr.collapsed > .frame { fill-opacity: 0.35 !important; stroke-dasharray: 6 4 !important; }
+.lod-far .chip text, .lod-far .badge, .lod-far .freeze-tag, .lod-far .diag-tag { display: none !important; }
+.lod-far .chip-box { opacity: 0.25 !important; }
+.lod-mid .chip text, .lod-mid .badge { opacity: 0.25 !important; }

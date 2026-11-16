@@ -11,6 +11,7 @@ marketplace named `leehogwang-plugins`, so any plugin here installs with two com
 | [see-parent](plugins/see-parent) | After `/fork`, keeps the session you forked from open in a pane: its conversation, and an input that runs your message as a prompt in that session | `/parent` |
 | [call](plugins/call) | Lists the AI CLIs installed here (claude, codex, agy, opencode) and opens the one you pick in a side pane, in the folder you work in. Run several at once and switch between them | `/call` |
 | [replay-theater](plugins/replay-theater) | Records the file edits Claude makes in a turn, then lets you step through them one diff at a time. From [anthropics/claude-code-playground](https://github.com/anthropics/claude-code-playground/tree/main/claude-code/mods/replay-theater) (Apache-2.0), copied here unchanged | `/replay` |
+| [svg-lens](plugins/svg-lens) | Rust-WASM VS Code SVG viewer (`LOD`, minimap, collapse, search, `<metadata id="nn-summary">`) + `nn-chart` skill | `Install from VSIX` |
 | [filetree](https://github.com/data-goblin/claude-code-filetree) (external) | IDE-style file tree pane with git status, and shimmer on files Claude reads, writes and commits. Installed from its own repo by `install.sh` | `/filetree` |
 
 ## Install
@@ -175,3 +176,16 @@ the real error before reporting.
   to commit messages.
 - Do not put secrets, tokens or personal paths in any file here.
 - Plugins must not modify the user's project files unless that is their stated purpose.
+
+## svg-lens
+
+Minimal Rust-WASM VS Code custom editor (`plugins/svg-lens/viewer`) for inspecting ultra-wide `nn-chart` SVGs (`100k+ px`), paired with the `nn-chart` skill (`plugins/svg-lens/skills/nn-chart/SKILL.md`).
+
+- **Install viewer in VS Code**: `Extensions` → `...` → `Install from VSIX...` → select `plugins/svg-lens/viewer/svg-lens-0.1.0.vsix`.
+- **Features**: native SVG `viewBox` pan/zoom, Rust-WASM minimap, semantic zoom (`LOD`), click-to-collapse containers (`Collapse` / header click), text search (`Enter`), bottleneck jump list (`Issues`), and `<metadata id="nn-summary">` stage overview (`Modules`).
+- **Build Rust WASM from source** (optional):
+  ```sh
+  cd plugins/svg-lens/viewer/rust
+  cargo build --release --target wasm32-unknown-unknown
+  cp target/wasm32-unknown-unknown/release/svg_lens_wasm.wasm ../media/svg_lens_wasm.wasm
+  ```

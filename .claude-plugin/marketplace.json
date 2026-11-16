@@ -27,6 +27,11 @@
       "name": "replay-theater",
       "source": "replay-theater",
       "description": "/replay: step through the file edits Claude made in the last turn, one diff at a time (from anthropics/claude-code-playground, Apache-2.0)"
+    },
+    {
+      "name": "svg-lens",
+      "source": "svg-lens",
+      "description": "Rust-WASM VS Code SVG viewer (LOD, minimap, collapse, search, nn-summary) + nn-chart skill"
     }
   ]
 }
