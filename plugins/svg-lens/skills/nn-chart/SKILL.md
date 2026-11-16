@@ -119,3 +119,9 @@ INPUT_ICONS = {
      6. **단계별 위치 키워드 & 세부 텐서 조작 해설**: `nn-summary` 단계별 요약, `gt`/`any`/`getitem` 등 보조 연산 의도, `report.json` 기반 병목·진단 요약(예: 스케일불균형, 합류비중, CKA 등)
 4. **응답 시 `SVG Lens` 뷰어 설치·열람 안내 (필수)**:
    - 생성된 `chart.svg`는 가로 수만~십수만 픽셀의 초대형 SVG이므로, 최종 답변에서 사용자에게 **VS Code 확장 `SVG Lens`** (`Claude-Plugins/plugins/svg-lens/viewer/svg-lens-0.1.1.vsix`)를 `Extensions → ... → Install from VSIX...`로 설치한 뒤 `chart.svg`를 열어 **칩 호버 툴팁 · `LOD`(시맨틱 줌) · `Modules`(단계 요약 목차) · `Collapse`(블록 접기/펼치기) · `Issues`(병목 점프)**로 탐색할 수 있음을 반드시 안내합니다.
+
+---
+
+## `README.md` 내 `?` 마커 질문 처리 규칙
+- 매번 `README.md`를 자동으로 읽거나 감시하지 않고, **사용자가 `nn-chart` 출력 `README.md` 파일을 직접 전달·지목한 경우에만** 해당 파일을 읽어 `?`가 달린 줄이나 항목을 찾습니다.
+- `?`가 붙은 모든 부분에 대해(같은 디렉토리의 `chart.svg`·`report.json` 또는 모델 코드를 근거로) 해당 연산/단계/용어가 무슨 뜻이고 왜 쓰였는지 쉬운 한국어로 상세히 설명하며, 사용자가 원하면 해당 `README.md`에도 풀이를 보충 반영합니다.
