@@ -14,6 +14,7 @@
   const mm = document.getElementById("mm");
   const mmBox = document.getElementById("mmBox");
   const mmRect = document.getElementById("mmRect");
+  const tipEl = document.getElementById("tip");
 
   let svgEl = null, svgW = 1000, svgH = 1000;
   let vx = 0, vy = 0, vw = 1000, vh = 1000;
@@ -21,6 +22,7 @@
   let mmDrag = false, showDiag = true, useLod = true, allCollapsed = false;
   let matches = [], mIdx = -1, hlTimer = null;
   let macroNodes = [];
+  let nnTips = { chips: {}, ops: {} };
   let wasm = null;
 
   if (window.__WASM_URI__) {
@@ -234,8 +236,180 @@
     });
   }
 
+  const OP_TIPS = {
+    gt: "원소별 > 비교로 불리언 마스크 생성",
+    lt: "원소별 < 비교로 불리언 마스크 생성",
+    ge: "원소별 >= 비교로 불리언 마스크 생성",
+    le: "원소별 <= 비교로 불리언 마스크 생성",
+    eq: "원소별 == 비교로 불리언 마스크 생성",
+    ne: "원소별 != 비교로 불리언 마스크 생성",
+    any: "조건이 하나라도 True인지 검사 (스칼라 bool 반환)",
+    all: "모든 원소가 True인지 검사 (스칼라 bool 반환)",
+    getitem: "인덱싱·슬라이싱 또는 None(축 추가)으로 텐서 형태 조정",
+    unsqueeze: "크기 1인 새 차원을 추가 (브로드캐스팅·차원 맞춤)",
+    squeeze: "크기 1인 차원을 제거",
+    view: "원소 순서를 유지한 채 텐서 shape 재해석",
+    reshape: "텐서 shape 변경 (필요 시 복사)",
+    permute: "텐서 차원(축) 순서 재배열",
+    transpose: "두 차원의 위치를 서로 교환",
+    contiguous: "메모리 배치를 연속적으로 정렬",
+    expand: "크기 1인 축을 메모리 복사 없이 목표 크기로 확장",
+    repeat: "지정 배수만큼 텐서 데이터를 실제로 복제 확장",
+    flatten: "지정 범위 차원을 1차원으로 펼침",
+    cat: "여러 텐서를 지정 축(dim) 기준으로 이어 붙임",
+    stack: "새 축을 추가해 여러 텐서를 쌓음",
+    chunk: "텐서를 지정 개수로 균등 분할",
+    split: "텐서를 지정 크기/개수로 분할",
+    where: "조건 마스크에 따라 두 텐서 값 중 하나를 선택",
+    masked_fill: "마스크가 True인 위치의 값을 지정 상수로 치환",
+    clamp: "텐서 값을 지정 [min, max] 범위로 제한",
+    sum: "지정 축 또는 전체 원소의 합 계산",
+    mean: "지정 축 또는 전체 원소의 평균 계산",
+    amax: "지정 축 기준 최댓값 추출",
+    amin: "지정 축 기준 최솟값 추출",
+    argmax: "가장 큰 값의 인덱스 반환",
+    softmax: "로짓을 합이 1인 확률 분포로 정규화",
+    sigmoid: "값을 (0, 1) 범위 확률/게이트로 변환",
+    tanh: "값을 (-1, 1) 범위로 비선형 압축",
+    silu: "SiLU/Swish 활성화 (x · sigmoid(x))",
+    gelu: "GELU 활성화 함수 (Transformer 표준)",
+    relu: "ReLU 활성화 (음수 0으로 클리핑)",
+    matmul: "행렬 곱셈 수행",
+    bmm: "배치 단위 행렬 곱셈 수행",
+    einsum: "아인슈타인 표기법 기반 텐서 축약/곱",
+    add: "원소별 덧셈 (잔차 연결 또는 바이어스 합)",
+    sub: "원소별 뺄셈",
+    mul: "원소별 곱셈 (게이팅·스케일링)",
+    div: "원소별 나눗셈 (정규화·스케일링)",
+    sqrt: "원소별 제곱근 계산",
+    rsqrt: "원소별 역제곱근 (1 / sqrt(x)) 계산",
+    exp: "원소별 지수 함수 e^x 계산",
+    log: "원소별 자연로그 계산",
+    linear: "선형 변환 (y = xW^T + b)",
+    conv2d: "2D 합성곱 특징 추출",
+    batchnorm2d: "배치 정규화 (채널별 평균·분산 정규화)",
+    layernorm: "레이어 정규화 (마지막 차원 기준 정규화)",
+    dropout: "학습 시 과적합 방지를 위해 일부 뉴런 무작위 비활성화",
+    embedding: "정수 인덱스를 고정 차원 임베딩 벡터로 매핑",
+    multiheadattention: "멀티헤드 어텐션 (Q·K^T 스케일 내적 후 V 가중합)",
+  };
+
+  function parseNnTips() {
+    nnTips = { chips: {}, ops: {} };
+    if (!svgEl) return;
+    const meta = svgEl.querySelector("metadata#nn-tips");
+    if (meta && meta.textContent) {
+      try {
+        const parsed = JSON.parse(meta.textContent.trim());
+        if (parsed && typeof parsed === "object") {
+          nnTips.chips = parsed.chips || {};
+          nnTips.ops = parsed.ops || {};
+        }
+      } catch (_) {}
+    }
+    svgEl.querySelectorAll("g.chip, g.ctr").forEach((el) => {
+      const t = el.querySelector(":scope > title");
+      if (t && t.textContent) {
+        if (!el.getAttribute("data-tip")) el.setAttribute("data-tip", t.textContent.trim());
+        t.remove();
+      }
+    });
+  }
+
+  function resolveTip(el) {
+    const label = Array.from(el.querySelectorAll(":scope > text"))
+      .map((t) => (t.textContent || "").trim())
+      .filter(Boolean)
+      .join(" ");
+    const id = el.getAttribute("id") || "";
+    const metaHit = (id && nnTips.chips[id]) || (label && nnTips.chips[label]);
+    const attrTip = el.getAttribute("data-tip");
+    const attrCode = el.getAttribute("data-code");
+    const attrIo = el.getAttribute("data-io");
+
+    if (metaHit && typeof metaHit === "object") {
+      return {
+        title: label || id,
+        desc: metaHit.meaning || metaHit.desc || "",
+        code: metaHit.code || attrCode || "",
+        io: metaHit.io || attrIo || "",
+      };
+    }
+    if (typeof metaHit === "string") {
+      return { title: label || id, desc: metaHit, code: attrCode || "", io: attrIo || "" };
+    }
+    if (attrTip) {
+      return { title: label || id, desc: attrTip, code: attrCode || "", io: attrIo || "" };
+    }
+
+    if (!label) return null;
+    const shapeMatch = label.match(/\(([^()]+)\)\s*$/);
+    const shapeInfo = shapeMatch ? shapeMatch[1] : "";
+    const rawHead = label.replace(/\s*\([^()]+\)\s*$/, "").trim();
+    const opToken = rawHead.replace(/^[\[\]f\s]+/, "").split(/[\[\s.(]/)[0].toLowerCase();
+
+    let desc = nnTips.ops[opToken] || OP_TIPS[opToken] || "";
+    if (opToken === "getitem" && rawHead.includes("None")) {
+      desc = "None 위치에 크기 1인 축을 추가 (unsqueeze / 브로드캐스팅 준비)";
+    }
+    if (!desc) return null;
+
+    const parentCtr = el.parentElement && el.parentElement.closest("g.ctr");
+    const ctrHdr = parentCtr && parentCtr.querySelector(":scope > .hdr text");
+    const ctrTitle = ctrHdr ? (ctrHdr.textContent || "").trim() : "";
+
+    return {
+      title: label,
+      desc,
+      code: "",
+      io: [shapeInfo ? `shape: ${shapeInfo}` : "", ctrTitle ? `블록: ${ctrTitle}` : ""].filter(Boolean).join(" · "),
+    };
+  }
+
+  function showTip(e, info) {
+    if (!info || !tipEl) return;
+    tipEl.innerHTML = "";
+    const hd = document.createElement("div");
+    hd.className = "tip-hd";
+    hd.textContent = info.title;
+    tipEl.appendChild(hd);
+
+    if (info.desc) {
+      const d = document.createElement("div");
+      d.className = "tip-desc";
+      d.textContent = info.desc;
+      tipEl.appendChild(d);
+    }
+    if (info.code) {
+      const c = document.createElement("div");
+      c.className = "tip-code";
+      c.textContent = info.code;
+      tipEl.appendChild(c);
+    }
+    if (info.io) {
+      const io = document.createElement("div");
+      io.className = "tip-io";
+      io.textContent = info.io;
+      tipEl.appendChild(io);
+    }
+
+    tipEl.classList.remove("hide");
+    const pad = 14;
+    const tw = tipEl.offsetWidth || 240;
+    const th = tipEl.offsetHeight || 60;
+    const left = Math.min(window.innerWidth - tw - 10, e.clientX + pad);
+    const top = Math.min(window.innerHeight - th - 10, e.clientY + pad);
+    tipEl.style.left = `${Math.max(8, left)}px`;
+    tipEl.style.top = `${Math.max(46, top)}px`;
+  }
+
+  function hideTip() {
+    if (tipEl) tipEl.classList.add("hide");
+  }
+
   function mount(svgText) {
     if (!svgText || !svgText.includes("<svg")) return;
+    hideTip();
     stage.innerHTML = svgText;
     svgEl = stage.querySelector("svg");
     if (!svgEl) return;
@@ -257,6 +431,7 @@
     svgEl.removeAttribute("height");
     svgEl.setAttribute("preserveAspectRatio", "xMidYMid meet");
     svgEl.classList.toggle("no-diag", !showDiag);
+    parseNnTips();
     buildModulesAndCollapse();
     buildIssues();
     matches = []; mIdx = -1; qLbl.textContent = "0/0";
@@ -265,23 +440,35 @@
 
   vp.addEventListener("wheel", (e) => {
     e.preventDefault();
+    hideTip();
     const r = vp.getBoundingClientRect();
     zoomBy(e.deltaY < 0 ? 1.18 : 1 / 1.18, e.clientX - r.left, e.clientY - r.top);
   }, { passive: false });
 
   vp.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
+    hideTip();
     drag = true; vp.classList.add("drag");
     sx = e.clientX; sy = e.clientY; svx = vx; svy = vy;
   });
+  vp.addEventListener("mouseleave", hideTip);
   window.addEventListener("mousemove", (e) => {
     if (drag) {
       const sc = currentScale();
       vx = svx - (e.clientX - sx) / sc;
       vy = svy - (e.clientY - sy) / sc;
       apply();
+      return;
     }
-    if (mmDrag) mmJump(e);
+    if (mmDrag) { mmJump(e); return; }
+    if (svgEl && e.target && e.target.closest) {
+      const chip = e.target.closest("g.chip");
+      if (chip) {
+        const info = resolveTip(chip);
+        if (info) { showTip(e, info); return; }
+      }
+    }
+    hideTip();
   });
   window.addEventListener("mouseup", () => { drag = false; mmDrag = false; vp.classList.remove("drag"); });
   window.addEventListener("resize", apply);

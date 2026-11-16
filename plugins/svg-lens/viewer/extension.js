@@ -58,6 +58,7 @@ class SvgLensProvider {
 <div id="mods" class="hide"><div id="modList"></div></div>
 <div id="mm"><div id="mmBox"><div id="mmRect"></div></div></div>
 <div id="side" class="hide"><div id="list"></div></div>
+<div id="tip" class="hide"></div>
 <script nonce="${nonce}">window.__WASM_URI__ = "${wasmUri}";</script>
 <script nonce="${nonce}" src="${jsUri}"></script>
 </body>
