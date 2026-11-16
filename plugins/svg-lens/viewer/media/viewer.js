@@ -11,8 +11,6 @@
   const iCnt = document.getElementById("iCnt");
   const side = document.getElementById("side");
   const mods = document.getElementById("mods");
-  const flowPanelEl = document.getElementById("flowPanel");
-  const flowBtn = document.getElementById("flowBtn");
   const mm = document.getElementById("mm");
   const mmBox = document.getElementById("mmBox");
   const mmRect = document.getElementById("mmRect");
@@ -24,90 +22,6 @@
   let matches = [], mIdx = -1, hlTimer = null;
   let macroNodes = [];
   let wasm = null;
-  let flowPanel = null;
-  let activeTrace = null;
-
-  function findSvgNodeForStep(step) {
-    if (!svgEl || !step) return null;
-    if (step.node_id) {
-      const byId = svgEl.querySelector(`#${CSS.escape(step.node_id)}`);
-      if (byId) return byId;
-    }
-    const q = String(step.label || step.module || "").trim().toLowerCase();
-    if (!q) return null;
-    const candidates = svgEl.querySelectorAll("g.ctr, g.chip");
-    for (const el of candidates) {
-      const txt = (el.querySelector(":scope > g.hdr .hdr-txt, :scope > g.hdr text, text")?.textContent || "").trim().toLowerCase();
-      if (txt && (txt === q || txt.includes(q) || q.includes(txt))) return el;
-    }
-    return null;
-  }
-
-  function applyFlowHighlights(stepIdx, step, meta) {
-    if (!svgEl || !flowPanelEl || flowPanelEl.classList.contains("hide")) return;
-    svgEl.classList.toggle("flow-dim-mode", Boolean(meta && meta.dimOthers));
-    svgEl.querySelectorAll(".flow-active, .flow-visited").forEach((el) => {
-      el.classList.remove("flow-active", "flow-visited");
-    });
-    const steps = (meta && meta.steps) || [];
-    for (let i = 0; i < stepIdx; i++) {
-      const n = findSvgNodeForStep(steps[i]);
-      if (n) n.classList.add("flow-visited");
-    }
-    const curNode = findSvgNodeForStep(step);
-    if (curNode) {
-      curNode.classList.add("flow-active");
-      if (meta && meta.autoFocus) focusEl(curNode, 0.75);
-    }
-  }
-
-  function setFlowOpen(open) {
-    if (!flowPanelEl || !flowBtn) return;
-    flowPanelEl.classList.toggle("hide", !open);
-    flowBtn.classList.toggle("on", open);
-    document.body.classList.toggle("flow-open", open);
-    if (svgEl && !open) {
-      svgEl.classList.remove("flow-dim-mode");
-      svgEl.querySelectorAll(".flow-active, .flow-visited").forEach((el) => {
-        el.classList.remove("flow-active", "flow-visited");
-      });
-    } else if (open && flowPanel && activeTrace) {
-      flowPanel.render();
-    }
-    apply();
-  }
-
-  if (window.SvgLensFlowPanel && flowPanelEl) {
-    flowPanel = new window.SvgLensFlowPanel(flowPanelEl, {
-      onStepChange: applyFlowHighlights,
-      onClose: () => setFlowOpen(false),
-    });
-  }
-
-  function buildFallbackTraceFromSvg() {
-    if (!svgEl) return null;
-    const nodes = Array.from(svgEl.querySelectorAll("g.ctr, g.chip"));
-    if (nodes.length === 0) return null;
-    const steps = nodes.map((el, idx) => {
-      const title = (el.querySelector(":scope > g.hdr .hdr-txt, :scope > g.hdr text, text")?.textContent || "").trim();
-      const diag = (el.querySelector(".diag-tag text")?.textContent || "").trim();
-      return {
-        step: idx + 1,
-        node_id: el.id || "",
-        label: title || el.id || `Node ${idx + 1}`,
-        phase: el.classList.contains("ctr") ? "module" : "op",
-        diagnostics: diag ? { summary: diag } : undefined,
-      };
-    });
-    return { source_code: "", steps };
-  }
-
-  function loadTrace(traceObj, autoOpen = true) {
-    if (!flowPanel || !traceObj || !Array.isArray(traceObj.steps) || traceObj.steps.length === 0) return;
-    activeTrace = traceObj;
-    flowPanel.setTrace(traceObj, 0);
-    if (autoOpen) setFlowOpen(true);
-  }
 
   if (window.__WASM_URI__) {
     fetch(window.__WASM_URI__)
@@ -347,18 +261,6 @@
     buildIssues();
     matches = []; mIdx = -1; qLbl.textContent = "0/0";
     fitH();
-
-    const embeddedTrace = svgEl.querySelector("#nn-trace");
-    if (embeddedTrace && embeddedTrace.textContent) {
-      try {
-        loadTrace(JSON.parse(embeddedTrace.textContent.trim()), true);
-      } catch (_) {}
-    } else if (activeTrace && flowPanel) {
-      flowPanel.setTrace(activeTrace, flowPanel.curStep);
-    } else {
-      const fallback = buildFallbackTraceFromSvg();
-      if (fallback) loadTrace(fallback, false);
-    }
   }
 
   vp.addEventListener("wheel", (e) => {
@@ -412,9 +314,6 @@
     focusEl(matches[mIdx], 0.9);
   }
 
-  if (flowBtn) {
-    flowBtn.onclick = () => setFlowOpen(flowPanelEl.classList.contains("hide"));
-  }
   document.getElementById("modBtn").onclick = (e) => {
     mods.classList.toggle("hide");
     e.currentTarget.classList.toggle("on", !mods.classList.contains("hide"));
@@ -453,16 +352,8 @@
     }
   });
 
-  window.addEventListener("keydown", (e) => {
-    if (!flowPanel || flowPanelEl.classList.contains("hide")) return;
-    if (document.activeElement === qIn) return;
-    if (e.key === "ArrowLeft") flowPanel.prev();
-    if (e.key === "ArrowRight") flowPanel.next();
-  });
-
   window.addEventListener("message", (e) => {
     if (e.data && e.data.type === "svg") mount(e.data.text);
-    if (e.data && e.data.type === "trace") loadTrace(e.data.trace, true);
   });
   vscode.postMessage({ type: "ready" });
 })();
