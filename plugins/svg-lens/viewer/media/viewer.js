@@ -292,6 +292,13 @@
     dropout: "학습 시 과적합 방지를 위해 일부 뉴런 무작위 비활성화",
     embedding: "정수 인덱스를 고정 차원 임베딩 벡터로 매핑",
     multiheadattention: "멀티헤드 어텐션 (Q·K^T 스케일 내적 후 V 가중합)",
+    to: "텐서 dtype(자료형) 또는 디바이스 변환",
+    interp: "공간 해상도를 목표 크기로 보간(리사이즈)",
+    interpolate: "공간 해상도를 목표 크기로 보간(리사이즈)",
+    conv: "합성곱 특징 추출 레이어",
+    adaptiveavgpool2d: "출력 크기에 맞춘 전역/적응형 평균 풀링",
+    avgpool2d: "2D 평균 풀링으로 공간 해상도 축소",
+    maxpool2d: "2D 최대 풀링으로 주요 특징 추출 및 축소",
   };
 
   function parseNnTips() {
@@ -317,36 +324,43 @@
   }
 
   function resolveTip(el) {
-    const label = Array.from(el.querySelectorAll(":scope > text"))
+    const texts = Array.from(el.querySelectorAll(":scope > text"))
       .map((t) => (t.textContent || "").trim())
-      .filter(Boolean)
-      .join(" ");
+      .filter(Boolean);
+    const label = texts.join(" ");
+    const cleanLabel = (texts.length > 1 ? texts.slice(1).join(" ") : label)
+      .replace(/^\[고정\]\s*/, "")
+      .trim();
     const id = el.getAttribute("id") || "";
-    const metaHit = (id && nnTips.chips[id]) || (label && nnTips.chips[label]);
+    const metaHit =
+      (id && nnTips.chips[id]) ||
+      (label && nnTips.chips[label]) ||
+      (cleanLabel && nnTips.chips[cleanLabel]);
     const attrTip = el.getAttribute("data-tip");
     const attrCode = el.getAttribute("data-code");
     const attrIo = el.getAttribute("data-io");
 
     if (metaHit && typeof metaHit === "object") {
       return {
-        title: label || id,
+        title: cleanLabel || label || id,
         desc: metaHit.meaning || metaHit.desc || "",
         code: metaHit.code || attrCode || "",
         io: metaHit.io || attrIo || "",
       };
     }
     if (typeof metaHit === "string") {
-      return { title: label || id, desc: metaHit, code: attrCode || "", io: attrIo || "" };
+      return { title: cleanLabel || label || id, desc: metaHit, code: attrCode || "", io: attrIo || "" };
     }
     if (attrTip) {
-      return { title: label || id, desc: attrTip, code: attrCode || "", io: attrIo || "" };
+      return { title: cleanLabel || label || id, desc: attrTip, code: attrCode || "", io: attrIo || "" };
     }
 
-    if (!label) return null;
-    const shapeMatch = label.match(/\(([^()]+)\)\s*$/);
+    const base = cleanLabel || label;
+    if (!base) return null;
+    const shapeMatch = base.match(/\(([^()]+)\)\s*$/);
     const shapeInfo = shapeMatch ? shapeMatch[1] : "";
-    const rawHead = label.replace(/\s*\([^()]+\)\s*$/, "").trim();
-    const opToken = rawHead.replace(/^[\[\]f\s]+/, "").split(/[\[\s.(]/)[0].toLowerCase();
+    const rawHead = base.replace(/\s*\([^()]+\)\s*$/, "").trim();
+    const opToken = rawHead.replace(/^[^A-Za-z0-9_]+/, "").split(/[\[\s.(]/)[0].toLowerCase();
 
     let desc = nnTips.ops[opToken] || OP_TIPS[opToken] || "";
     if (opToken === "getitem" && rawHead.includes("None")) {
@@ -359,7 +373,7 @@
     const ctrTitle = ctrHdr ? (ctrHdr.textContent || "").trim() : "";
 
     return {
-      title: label,
+      title: base,
       desc,
       code: "",
       io: [shapeInfo ? `shape: ${shapeInfo}` : "", ctrTitle ? `블록: ${ctrTitle}` : ""].filter(Boolean).join(" · "),
